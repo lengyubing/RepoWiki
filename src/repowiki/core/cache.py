@@ -95,6 +95,29 @@ class Cache:
         except json.JSONDecodeError:
             return None
 
+    async def list_projects(self) -> list[tuple[str, dict, float]]:
+        """return all saved projects as (id, data, created_at), newest first."""
+        if not self._db:
+            return []
+        cursor = await self._db.execute(
+            "SELECT id, data, created_at FROM projects ORDER BY created_at DESC"
+        )
+        rows = await cursor.fetchall()
+        result = []
+        for project_id, data, created_at in rows:
+            try:
+                result.append((project_id, json.loads(data), created_at))
+            except json.JSONDecodeError:
+                continue
+        return result
+
+    async def delete_project(self, project_id: str) -> None:
+        """remove a saved project by id."""
+        if not self._db:
+            return
+        await self._db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        await self._db.commit()
+
     async def clear(self) -> int:
         """Wipe cached LLM results (not saved projects). Returns rows removed."""
         if not self._db:

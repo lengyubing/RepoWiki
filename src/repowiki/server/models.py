@@ -11,6 +11,7 @@ class ScanRequest(BaseModel):
     language: str = "en"
     model: str | None = None
     api_key: str | None = None
+    api_base: str | None = None
 
 
 class ProjectInfo(BaseModel):
@@ -20,6 +21,8 @@ class ProjectInfo(BaseModel):
     total_files: int = 0
     total_lines: int = 0
     error: str = ""
+    source: str = ""  # original input: local path or git URL
+    created_at: float = 0  # unix timestamp
 
 
 class ChatRequest(BaseModel):

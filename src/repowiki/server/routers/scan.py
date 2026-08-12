@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Header
@@ -20,12 +21,54 @@ router = APIRouter()
 async def start_scan(req: ScanRequest, background_tasks: BackgroundTasks,
                      x_api_key: str | None = Header(None)):
     project_id = str(uuid.uuid4())[:8]
-    info = ProjectInfo(id=project_id, name="", status="pending")
+    # remember the original input (local path or URL) for the project list
+    source = (req.path or req.url or "").strip()
+    info = ProjectInfo(id=project_id, name="", status="pending", source=source, created_at=time.time())
     projects = get_projects()
     projects[project_id] = {"info": info, "wiki": None, "project": None, "progress": []}
 
     background_tasks.add_task(_run_scan, project_id, req, x_api_key)
     return info
+
+
+@router.get("/projects")
+async def list_projects():
+    """list all known projects (in-memory + persisted), newest first."""
+    projects = get_projects()
+    seen: set[str] = set()
+    items: list[dict] = []
+    # in-memory entries first (most recent activity)
+    for project_id, proj in projects.items():
+        seen.add(project_id)
+        info: ProjectInfo = proj["info"]
+        items.append(info.model_dump())
+    # then any persisted-only entries (recovered at startup, not yet re-scanned)
+    cache = get_cache()
+    try:
+        for project_id, data, _created_at in await cache.list_projects():
+            if project_id in seen:
+                continue
+            info_data = data.get("info") if isinstance(data, dict) else None
+            if isinstance(info_data, dict):
+                items.append(info_data)
+    except Exception:
+        pass
+    # sort by created_at descending
+    items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return {"projects": items}
+
+
+@router.delete("/projects/{project_id}")
+async def delete_project(project_id: str):
+    """remove a project from memory and from persisted storage."""
+    projects = get_projects()
+    removed_mem = projects.pop(project_id, None) is not None
+    cache = get_cache()
+    try:
+        await cache.delete_project(project_id)
+    except Exception:
+        pass
+    return {"deleted": removed_mem, "id": project_id}
 
 
 @router.get("/project/{project_id}")
@@ -81,18 +124,43 @@ async def _run_scan(project_id: str, req: ScanRequest, user_api_key: str | None)
             cfg.api_key = user_api_key
         elif req.api_key:
             cfg.api_key = req.api_key
+        if req.api_base:
+            cfg.api_base = req.api_base
 
         def progress(msg: str):
             proj["progress"].append(msg)
 
         # ingest
         progress("Ingesting project...")
-        if req.url:
-            from repowiki.ingest.github import ingest_github
-            project = ingest_github(req.url, max_file_size=cfg.max_file_size, max_files=cfg.max_files)
-        elif req.path:
+
+        # resolve the target: prefer an explicit local path, then a URL, then a
+        # value typed into the URL box that is actually a local path. This keeps
+        # the web UI's single-input behavior consistent with the CLI.
+        from pathlib import Path
+
+        from repowiki.ingest.github import parse_git_url
+
+        local_path: str | None = None
+        remote_url: str | None = None
+
+        if req.path:
+            local_path = req.path
+        elif req.url:
+            # a real URL (http...) or a recognized git host string -> remote
+            if req.url.startswith("http") or parse_git_url(req.url) is not None:
+                remote_url = req.url
+            elif Path(req.url).exists():
+                # user typed a local path into the URL box
+                local_path = req.url
+            else:
+                remote_url = req.url  # let ingest_github raise a clear error
+
+        if local_path:
             from repowiki.ingest.local import ingest_local
-            project = ingest_local(req.path, max_file_size=cfg.max_file_size, max_files=cfg.max_files)
+            project = ingest_local(local_path, max_file_size=cfg.max_file_size, max_files=cfg.max_files)
+        elif remote_url:
+            from repowiki.ingest.github import ingest_github
+            project = ingest_github(remote_url, max_file_size=cfg.max_file_size, max_files=cfg.max_files)
         else:
             raise ValueError("Either path or url must be provided")
 
@@ -105,6 +173,7 @@ async def _run_scan(project_id: str, req: ScanRequest, user_api_key: str | None)
         if not cfg.api_key:
             proj["info"].status = "error"
             proj["info"].error = "No API key configured"
+            await _persist_project(project_id)
             return
 
         # analyze
@@ -126,8 +195,27 @@ async def _run_scan(project_id: str, req: ScanRequest, user_api_key: str | None)
         proj["wiki"] = wiki
         proj["info"].status = "done"
         progress("Done!")
+        await _persist_project(project_id)
 
     except Exception as e:
         proj["info"].status = "error"
         proj["info"].error = str(e)
         proj["progress"].append(f"Error: {e}")
+        await _persist_project(project_id)
+
+
+async def _persist_project(project_id: str) -> None:
+    """save project metadata to SQLite so it survives restarts."""
+    projects = get_projects()
+    proj = projects.get(project_id)
+    if not proj:
+        return
+    info: ProjectInfo = proj["info"]
+    file_tree = ""
+    if proj.get("project") is not None:
+        file_tree = proj["project"].file_tree or ""
+    try:
+        cache = get_cache()
+        await cache.save_project(project_id, {"info": info.model_dump(), "file_tree": file_tree})
+    except Exception:
+        pass

@@ -1,14 +1,39 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { scanProject, streamScanProgress, getWiki } from "../lib/api";
+import { scanProject, streamScanProgress, getWiki, listProjects, type ProjectInfo } from "../lib/api";
 import { useWikiStore } from "../stores/wiki";
 import SettingsModal from "../components/SettingsModal";
 
 export default function Home() {
   const [url, setUrl] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<ProjectInfo[]>([]);
   const { loading, setLoading, scanProgress, addProgress, setProjectId, setProject, setWiki, setError, reset, settings } = useWikiStore();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    listProjects().then(setRecentProjects).catch(() => {});
+  }, [loading]);
+
+  function formatDate(ts?: number) {
+    if (!ts) return "";
+    try {
+      return new Date(ts * 1000).toLocaleString();
+    } catch {
+      return "";
+    }
+  }
+
+  function statusLabel(status: string) {
+    switch (status) {
+      case "done": return { text: "Ready", cls: "bg-green-100 text-green-700" };
+      case "scanning": return { text: "Scanning", cls: "bg-blue-100 text-blue-700" };
+      case "pending": return { text: "Pending", cls: "bg-slate-100 text-slate-600" };
+      case "error": return { text: "Error", cls: "bg-red-100 text-red-700" };
+      case "archived": return { text: "Archived", cls: "bg-amber-100 text-amber-700" };
+      default: return { text: status, cls: "bg-slate-100 text-slate-600" };
+    }
+  }
 
   async function handleScan() {
     if (!url.trim()) return;
@@ -25,6 +50,7 @@ export default function Home() {
         url: url.trim(),
         language: settings.language,
         model: settings.model || undefined,
+        api_base: settings.apiBase || undefined,
       });
       setProjectId(info.id);
       setProject(info);
@@ -112,6 +138,46 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        {/* recent projects */}
+        {recentProjects.length > 0 && (
+          <div className="max-w-3xl w-full mt-12">
+            <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-4">
+              Recent Projects
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {recentProjects.map((p) => {
+                const badge = statusLabel(p.status);
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => navigate(`/project/${p.id}`)}
+                    className="text-left bg-white rounded-lg border border-slate-200 p-4 hover:border-blue-400 hover:shadow-sm transition-all group"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-slate-800 truncate group-hover:text-blue-600">
+                        {p.name || p.source || p.id}
+                      </span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${badge.cls}`}>
+                        {badge.text}
+                      </span>
+                    </div>
+                    {p.source && (
+                      <p className="text-xs text-slate-400 truncate mb-1" title={p.source}>
+                        {p.source}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-3 text-xs text-slate-400">
+                      <span>{p.total_files} files</span>
+                      <span>{p.total_lines.toLocaleString()} lines</span>
+                      {formatDate(p.created_at) && <span>{formatDate(p.created_at)}</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* features */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl mt-16">

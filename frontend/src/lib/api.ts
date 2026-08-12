@@ -12,6 +12,7 @@ export interface ScanRequest {
   url?: string;
   language?: string;
   model?: string;
+  api_base?: string;
 }
 
 export interface ProjectInfo {
@@ -21,6 +22,8 @@ export interface ProjectInfo {
   total_files: number;
   total_lines: number;
   error?: string;
+  source?: string;
+  created_at?: number;
 }
 
 export interface WikiStructure {
@@ -53,6 +56,51 @@ export async function scanProject(req: ScanRequest): Promise<ProjectInfo> {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify(req),
+  });
+  return res.json();
+}
+
+export async function listProjects(): Promise<ProjectInfo[]> {
+  const res = await fetch(`${BASE}/projects`, { headers: getHeaders() });
+  const data = await res.json();
+  return data.projects || [];
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  await fetch(`${BASE}/projects/${projectId}`, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
+}
+
+export interface PromptTemplates {
+  [key: string]: { system: string; user: string };
+}
+
+export interface PromptsResponse {
+  current: PromptTemplates;
+  defaults: PromptTemplates;
+  keys: string[];
+}
+
+export async function getPrompts(): Promise<PromptsResponse> {
+  const res = await fetch(`${BASE}/prompts`, { headers: getHeaders() });
+  return res.json();
+}
+
+export async function savePrompts(prompts: PromptTemplates): Promise<PromptsResponse> {
+  const res = await fetch(`${BASE}/prompts`, {
+    method: "PUT",
+    headers: getHeaders(),
+    body: JSON.stringify({ prompts }),
+  });
+  return res.json();
+}
+
+export async function resetPrompts(): Promise<PromptsResponse> {
+  const res = await fetch(`${BASE}/prompts/reset`, {
+    method: "POST",
+    headers: getHeaders(),
   });
   return res.json();
 }

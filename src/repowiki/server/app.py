@@ -36,6 +36,23 @@ def create_app():
         global _cache
         _cache = Cache()
         await _cache.init()
+        # restore previously scanned projects from SQLite so they show up on the
+        # home page after a restart. Only metadata is restored; the wiki body is
+        # rebuilt lazily when the user re-opens the project.
+        try:
+            from repowiki.server.models import ProjectInfo
+
+            for project_id, data, _created in await _cache.list_projects():
+                info_data = data.get("info") if isinstance(data, dict) else None
+                if isinstance(info_data, dict):
+                    info = ProjectInfo(**{k: v for k, v in info_data.items()
+                                          if k in ProjectInfo.model_fields})
+                    # a restarted project's wiki is no longer in memory
+                    if info.status == "done":
+                        info.status = "archived"
+                    _projects[project_id] = {"info": info, "wiki": None, "project": None, "progress": []}
+        except Exception:
+            pass
         yield
         await _cache.close()
 
@@ -54,10 +71,11 @@ def create_app():
     )
 
     # register routers
-    from repowiki.server.routers import chat, scan, wiki
+    from repowiki.server.routers import chat, config, scan, wiki
     app.include_router(scan.router, prefix="/api")
     app.include_router(wiki.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
+    app.include_router(config.router, prefix="/api")
 
     @app.get("/api/health")
     async def health():
