@@ -33,3 +33,14 @@ src/repowiki/server/static/
 
 .DS_Store
 Thumbs.db
+
+# ZCode agent working files
+.zcode/
+
+# Sensitive config — tokens/keys live here, NEVER commit
+# (these are runtime data, not source code)
+.env
+.env.*
+*.pem
+*.key
+repowiki-config.json
