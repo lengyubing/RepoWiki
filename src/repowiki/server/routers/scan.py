@@ -71,6 +71,27 @@ async def delete_project(project_id: str):
     return {"deleted": removed_mem, "id": project_id}
 
 
+@router.post("/project/{project_id}/reanalyze")
+async def reanalyze_project(project_id: str, background_tasks: BackgroundTasks):
+    """re-run the LLM analysis for an already-ingested project, ignoring cache.
+
+    The project must have been scanned before (its ingested files are reused so
+    there's no re-clone / re-scan of the directory). Useful after editing prompt
+    templates or switching models.
+    """
+    projects = get_projects()
+    proj = projects.get(project_id)
+    if not proj:
+        return {"error": "Project not found"}
+    if not proj.get("project"):
+        return {"error": "Project has no ingested files. Re-scan it from the home page first."}
+
+    proj["info"].status = "scanning"
+    proj["progress"] = []
+    background_tasks.add_task(_run_reanalyze, project_id)
+    return proj["info"]
+
+
 @router.get("/project/{project_id}")
 async def get_project(project_id: str):
     projects = get_projects()
@@ -229,3 +250,67 @@ async def _persist_project(project_id: str) -> None:
         await cache.save_project(project_id, {"info": info.model_dump(), "file_tree": file_tree})
     except Exception:
         pass
+
+
+async def _run_reanalyze(project_id: str) -> None:
+    """re-run the analysis pipeline for an existing project, ignoring LLM cache."""
+    projects = get_projects()
+    proj = projects.get(project_id)
+    if not proj or not proj.get("project"):
+        return
+
+    info: ProjectInfo = proj["info"]
+    info.status = "scanning"
+    info.error = ""
+    saved = proj.get("llm_config") or {}
+
+    def progress(msg: str):
+        proj["progress"].append(msg)
+
+    try:
+        from repowiki.core.analyzer import Analyzer
+        from repowiki.core.graph import DependencyGraph
+        from repowiki.core.wiki_builder import WikiBuilder
+        from repowiki.llm.client import LLMClient
+
+        project = proj["project"]
+        cfg = Config.load()
+        if saved.get("model"):
+            cfg.model = saved["model"]
+        if saved.get("api_base"):
+            cfg.api_base = saved["api_base"]
+        if saved.get("language"):
+            cfg.language = saved["language"]
+        if saved.get("api_key"):
+            cfg.api_key = saved["api_key"]
+
+        if not cfg.api_key:
+            info.status = "error"
+            info.error = "No API key configured"
+            await _persist_project(project_id)
+            return
+
+        cache = get_cache()
+        llm = LLMClient(model=cfg.model, api_key=cfg.api_key, api_base=cfg.api_base)
+        analyzer = Analyzer(
+            llm=llm, cache=cache, language=cfg.language,
+            concurrency=cfg.concurrency, force_refresh=True,
+        )
+
+        progress("Re-analyzing (ignoring cache)...")
+        wiki_data = await analyzer.analyze(project, on_progress=progress)
+
+        graph = DependencyGraph.build_from_project(project)
+        builder = WikiBuilder()
+        wiki = builder.build(project, wiki_data, graph)
+
+        proj["wiki"] = wiki
+        info.status = "done"
+        progress("Done!")
+        await _persist_project(project_id)
+
+    except Exception as e:
+        info.status = "error"
+        info.error = str(e)
+        proj["progress"].append(f"Error: {e}")
+        await _persist_project(project_id)

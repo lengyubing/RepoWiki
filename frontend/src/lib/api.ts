@@ -73,6 +73,14 @@ export async function deleteProject(projectId: string): Promise<void> {
   });
 }
 
+export async function reanalyzeProject(projectId: string): Promise<ProjectInfo> {
+  const res = await fetch(`${BASE}/project/${projectId}/reanalyze`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  return res.json();
+}
+
 export interface PromptTemplates {
   [key: string]: { system: string; user: string };
 }

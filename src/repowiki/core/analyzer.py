@@ -38,11 +38,19 @@ class Analyzer:
         cache: Cache,
         language: str = "en",
         concurrency: int = 5,
+        force_refresh: bool = False,
     ):
         self.llm = llm
         self.cache = cache
         self.language = language
+        self.force_refresh = force_refresh
         self._sem = asyncio.Semaphore(concurrency)
+
+    async def _cache_get(self, key: str) -> dict | list | None:
+        """cache read that respects force_refresh (skips cache when re-analyzing)."""
+        if self.force_refresh:
+            return None
+        return await self.cache.get(key)
 
     async def analyze(
         self,
@@ -105,7 +113,7 @@ class Analyzer:
         self, project: ProjectContext, key_files: str, tree_hash: str
     ) -> ProjectOverview:
         cache_key = f"overview:{tree_hash}"
-        cached = await self.cache.get(cache_key)
+        cached = await self._cache_get(cache_key)
         if cached:
             try:
                 return ProjectOverview(**cached)
@@ -198,7 +206,7 @@ class Analyzer:
             files_context = "\n\n".join(files_text_parts)
             cache_key = f"module:{name}:{content_hash(''.join(content_parts))}"
 
-            cached = await self.cache.get(cache_key)
+            cached = await self._cache_get(cache_key)
             if cached:
                 try:
                     return ModuleDoc(**cached), True
@@ -226,7 +234,7 @@ class Analyzer:
         self, project: ProjectContext, key_files: str, tree_hash: str
     ) -> ArchitectureDiagram:
         cache_key = f"arch:{tree_hash}"
-        cached = await self.cache.get(cache_key)
+        cached = await self._cache_get(cache_key)
         if cached:
             try:
                 return ArchitectureDiagram(**cached)
@@ -286,7 +294,7 @@ class Analyzer:
         # key on the actual prompt inputs so an import-only edit that reshuffles
         # the ranking also invalidates the cached guide
         cache_key = f"guide:{tree_hash}:{content_hash(rankings + module_summaries)}"
-        cached = await self.cache.get(cache_key)
+        cached = await self._cache_get(cache_key)
         if cached:
             try:
                 return ReadingGuide(**cached)
