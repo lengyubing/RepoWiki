@@ -127,6 +127,16 @@ async def _run_scan(project_id: str, req: ScanRequest, user_api_key: str | None)
         if req.api_base:
             cfg.api_base = req.api_base
 
+        # persist the resolved LLM config on the project entry so the chat
+        # endpoint reuses the same model/api_key/api_base the user picked at
+        # scan time, instead of falling back to defaults.
+        proj["llm_config"] = {
+            "model": cfg.model,
+            "api_key": cfg.api_key,
+            "api_base": cfg.api_base,
+            "language": cfg.language,
+        }
+
         def progress(msg: str):
             proj["progress"].append(msg)
 

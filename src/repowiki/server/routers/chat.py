@@ -51,10 +51,22 @@ async def chat(project_id: str, req: ChatRequest, x_api_key: str | None = Header
 
     context_text = "\n\n".join(context_parts)
 
-    # get LLM config
+    # Resolve LLM config: prefer the model/api_base used at scan time (stored on
+    # the project entry), so chat stays consistent with how the wiki was built.
+    # Fall back to Config.load() defaults for legacy/older project entries.
+    saved = proj.get("llm_config") or {}
     cfg = Config.load()
+    if saved.get("model"):
+        cfg.model = saved["model"]
+    if saved.get("api_base"):
+        cfg.api_base = saved["api_base"]
+    if saved.get("language"):
+        cfg.language = saved["language"]
+    # api_key: header override > saved > config file / env
     if x_api_key:
         cfg.api_key = x_api_key
+    elif saved.get("api_key"):
+        cfg.api_key = saved["api_key"]
 
     if not cfg.api_key:
         return {"error": "No API key configured"}
