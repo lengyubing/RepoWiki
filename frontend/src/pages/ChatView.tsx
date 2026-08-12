@@ -28,6 +28,13 @@ export default function ChatView() {
       question,
       (data) => {
         if (data.references) setLastChatReferences(data.references);
+        if (data.error) {
+          // LLM call failed — show a clear error instead of passing the error
+          // text off as a normal answer.
+          const modelInfo = data.model ? `\n\nModel: ${data.model}` : "";
+          const baseInfo = data.api_base ? `\nBase URL: ${data.api_base}` : "";
+          appendToLastChat(`⚠️ ${data.error}${modelInfo}${baseInfo}\n\nPlease check your API Key and Base URL in Settings, then try again.`);
+        }
         if (data.content) appendToLastChat(data.content);
       },
       () => setStreaming(false),

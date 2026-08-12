@@ -188,3 +188,9 @@ export function streamChat(
     onDone();
   });
 }
+
+export interface ChatError {
+  error: string;
+  model?: string;
+  api_base?: string;
+}

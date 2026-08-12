@@ -81,9 +81,19 @@ async def chat(project_id: str, req: ChatRequest, x_api_key: str | None = Header
         # send references first
         yield f"data: {json.dumps({'references': references})}\n\n"
 
-        # stream the answer
+        # stream the answer; detect LLM errors so we can surface them as a
+        # proper error event instead of passing the error string off as content.
+        had_content = False
         async for chunk in llm.stream(messages):
+            if chunk.startswith("[LLM Error:"):
+                yield f"data: {json.dumps({'error': chunk, 'model': cfg.model, 'api_base': cfg.api_base or '(provider default)'})}\n\n"
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                return
+            had_content = True
             yield f"data: {json.dumps({'content': chunk})}\n\n"
+
+        if not had_content:
+            yield f"data: {json.dumps({'error': 'No response from model. Check your API key and Base URL in Settings.', 'model': cfg.model, 'api_base': cfg.api_base or '(provider default)'})}\n\n"
 
         yield f"data: {json.dumps({'done': True})}\n\n"
 
