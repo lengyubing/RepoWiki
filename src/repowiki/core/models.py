@@ -40,6 +40,13 @@ class TechItem(BaseModel):
     version: str = ""
 
 
+class Formula(BaseModel):
+    """an important business/algorithmic formula worth surfacing in the docs."""
+    name: str = ""
+    expression: str = ""  # the formula itself, e.g. "score = tf * log(N / df)"
+    explanation: str = ""
+
+
 class ProjectOverview(BaseModel):
     name: str = ""
     one_liner: str = ""
@@ -47,6 +54,8 @@ class ProjectOverview(BaseModel):
     tech_stack: list[TechItem] = Field(default_factory=list)
     setup_instructions: list[str] = Field(default_factory=list)
     key_features: list[str] = Field(default_factory=list)
+    business_cases: list[str] = Field(default_factory=list)  # main business use cases
+    formulas: list[Formula] = Field(default_factory=list)  # important formulas
 
 
 class Symbol(BaseModel):
@@ -80,12 +89,21 @@ class ModuleDoc(BaseModel):
     files: list[FileDoc] = Field(default_factory=list)
     relationships: list[Relationship] = Field(default_factory=list)
     key_concepts: list[Concept] = Field(default_factory=list)
+    potential_issues: list[str] = Field(default_factory=list)  # bugs, risks, code smells
+    optimization_points: list[str] = Field(default_factory=list)  # perf/quality improvements
 
 
 class Component(BaseModel):
     name: str
     purpose: str = ""
     files: list[str] = Field(default_factory=list)
+
+
+class DependencyItem(BaseModel):
+    """an external service or framework the project depends on."""
+    name: str
+    category: str = ""  # e.g. database, message-queue, web-framework, orm
+    purpose: str = ""  # what it's used for in this project
 
 
 class ArchitectureDiagram(BaseModel):
@@ -95,6 +113,8 @@ class ArchitectureDiagram(BaseModel):
     mermaid_component: str = ""
     mermaid_sequence: str = ""
     data_flow: str = ""
+    service_dependencies: list[DependencyItem] = Field(default_factory=list)
+    framework_dependencies: list[DependencyItem] = Field(default_factory=list)
 
 
 class ReadingStep(BaseModel):

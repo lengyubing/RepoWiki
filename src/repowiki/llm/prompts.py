@@ -41,58 +41,98 @@ _JSON_INSTRUCTION = (
 DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
     "overview": {
         "system": (
-            "You are a senior software engineer explaining a project to a new team member. "
-            "Be direct, specific, and concrete. "
+            "You are a senior software engineer and business analyst explaining a "
+            "project to a new team member. Focus on BOTH the business perspective "
+            "(what problem it solves, who uses it, main use cases) and the technical "
+            "perspective (architecture, tech stack). Be direct, specific, and concrete. "
             "Do NOT use filler phrases like 'leveraging', 'utilizing', 'cutting-edge', "
-            "'robust', or 'comprehensive'. Just describe what things do. {lang}"
+            "'robust', or 'comprehensive'. Just describe what things do. "
+            "If the project involves important formulas (scoring, ranking, pricing, "
+            "ML loss functions, etc.), extract and explain them. {lang}"
         ),
         "user": (
-            "Here is the file tree and key files of a project:\n\n"
+            "Analyze this project's code. If a previous scan exists, focus on what's "
+            "new or changed (incremental); otherwise analyze the full codebase.\n\n"
             "## File Tree\n```\n{file_tree}\n```\n\n"
             "## Key Files\n{key_files}\n\n"
             "Generate a project overview as JSON with this structure:\n"
             "{\n"
             '  "name": "project name",\n'
             '  "one_liner": "what this project does in one sentence (max 20 words)",\n'
-            '  "description": "2-3 paragraphs explaining the project in plain language",\n'
-            '  "tech_stack": [{"name": "Python", "category": "language", "version": "3.10+"}],\n'
+            '  "description": "2-3 paragraphs: business background, what problem it '
+            'solves, and the overall technical approach",\n'
+            '  "tech_stack": [{"name": "Python", "category": "language|framework|database|tool", "version": "3.10+"}],\n'
             '  "setup_instructions": ["step 1", "step 2"],\n'
-            '  "key_features": ["feature 1", "feature 2"]\n'
+            '  "key_features": ["core feature 1", "core feature 2"],\n'
+            '  "business_cases": [\n'
+            '    "main user-facing use case / business scenario 1",\n'
+            '    "main user-facing use case / business scenario 2"\n'
+            '  ],\n'
+            '  "formulas": [\n'
+            '    {"name": "formula name", "expression": "score = tf * log(N / df)", '
+            '"explanation": "what it computes and why it matters"}\n'
+            '  ]\n'
             "}\n\n"
+            "Notes:\n"
+            "- business_cases: list the main business workflows / user scenarios the "
+            "code supports, derived from entry points, routes, and core logic.\n"
+            "- formulas: only include IMPORTANT formulas (ranking, scoring, pricing, "
+            "ML metrics, core algorithms). Leave the array empty if there are none.\n"
             "{json_instruction}"
         ),
     },
     "module": {
         "system": (
-            "You are a senior engineer documenting your own code. "
-            "Be direct and specific. No filler. "
-            "Explain what each file does, how files relate to each other, "
-            "and what the key functions/classes are. {lang}"
+            "You are a senior engineer doing a thorough code review while documenting "
+            "your own code. Be direct and specific. No filler. "
+            "For each module explain: what each file does, how files interact with "
+            "each other (call chains, data passing, events), and what the key "
+            "functions/classes are. "
+            "ALSO identify potential problems (bugs, race conditions, error-handling "
+            "gaps, security risks, code smells) and concrete optimization points "
+            "(performance, maintainability, scalability). Be honest and specific -- "
+            "cite file/function names. {lang}"
         ),
         "user": (
             "Project: {project_summary}\n\n"
-            "Document the '{module_name}' module. Here are its files:\n\n"
+            "Analyze the '{module_name}' module. Here are its files:\n\n"
             "{files_context}\n\n"
             "Output JSON:\n"
             "{\n"
             '  "name": "{module_name}",\n'
-            '  "purpose": "one sentence",\n'
-            '  "description": "detailed explanation",\n'
+            '  "purpose": "one sentence on what this module is responsible for",\n'
+            '  "description": "detailed explanation of the module\'s role and how it works",\n'
             '  "files": [\n'
             '    {"path": "file.py", "purpose": "what it does", '
             '"key_symbols": [{"name": "func_name", "kind": "function", "description": "..."}]}\n'
             '  ],\n'
-            '  "relationships": [{"source": "a.py", "target": "b.py", "description": "a imports b for..."}],\n'
-            '  "key_concepts": [{"name": "concept", "explanation": "..."}]\n'
+            '  "relationships": [{"source": "a.py", "target": "b.py", "description": "a calls b for..."}],\n'
+            '  "key_concepts": [{"name": "concept", "explanation": "..."}],\n'
+            '  "potential_issues": [\n'
+            '    "specific bug/risk with file and function reference, e.g. '
+            "'user_service.py:login() has no rate limiting\"\n"
+            '  ],\n'
+            '  "optimization_points": [\n'
+            '    "specific improvement suggestion with file reference, e.g. '
+            "'db.py:query() runs N+1 queries, batch them\"\n"
+            '  ]\n'
             "}\n\n"
+            "Notes:\n"
+            "- relationships: describe HOW files interact (who calls whom, data flow, "
+            "event subscriptions), not just import edges.\n"
+            "- potential_issues: be concrete and cite locations. Leave empty if truly none.\n"
+            "- optimization_points: actionable improvements. Leave empty if none.\n"
             "{json_instruction}"
         ),
     },
     "architecture": {
         "system": (
             "You are a software architect analyzing a codebase. "
-            "Identify the architecture pattern and generate Mermaid diagrams. "
-            "Mermaid syntax must be valid. Use simple node names (no special chars). {lang}"
+            "Identify the architecture pattern, map out components and their interactions, "
+            "describe the main data flow, and inventory ALL external dependencies "
+            "(services the app talks to: databases, caches, message queues, third-party "
+            "APIs; and frameworks/libraries it's built on: web framework, ORM, etc.). "
+            "Generate valid Mermaid diagrams with simple node names. {lang}"
         ),
         "user": (
             "## File Tree\n```\n{file_tree}\n```\n\n"
@@ -100,14 +140,29 @@ DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
             "Analyze the architecture. Output JSON:\n"
             "{\n"
             '  "architecture_type": "one of: monolith, client-server, microservices, library, cli-tool, framework, plugin-system, pipeline",\n'
-            '  "description": "explain the architecture in 2-3 sentences",\n'
+            '  "description": "explain the architecture, component interactions, and '
+            'request/data flow in 2-4 sentences",\n'
             '  "components": [{"name": "...", "purpose": "...", "files": ["..."]}],\n'
             '  "mermaid_component": "graph TD\\n  A[Component] --> B[Component]\\n  ...",\n'
             '  "mermaid_sequence": "sequenceDiagram\\n  participant A\\n  A->>B: request\\n  ...",\n'
-            '  "data_flow": "describe the main data flow in 2-3 sentences"\n'
+            '  "data_flow": "describe the main data flow end-to-end: where data enters, '
+            'how it transforms, where it persists",\n'
+            '  "service_dependencies": [\n'
+            '    {"name": "PostgreSQL", "category": "database|cache|message-queue|'
+            'search|third-party-api|object-storage", "purpose": "primary transactional store"}\n'
+            '  ],\n'
+            '  "framework_dependencies": [\n'
+            '    {"name": "FastAPI", "category": "web-framework|orm|task-queue|'
+            'auth|serialization|testing", "purpose": "serves the REST API"}\n'
+            '  ]\n'
             "}\n\n"
             "IMPORTANT: Mermaid code must be a single string with \\n for newlines. "
-            "Use simple alphanumeric node IDs. "
+            "Use simple alphanumeric node IDs.\n"
+            "Notes:\n"
+            "- service_dependencies: external systems the code connects to at runtime "
+            "(read from config, connection code, env vars).\n"
+            "- framework_dependencies: libraries/frameworks the code is built on "
+            "(read from package files, imports).\n"
             "{json_instruction}"
         ),
     },
@@ -115,8 +170,10 @@ DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
         "system": (
             "You are a mentor helping a developer understand a new codebase. "
             "Create a reading guide: which files to read, in what order, and why. "
-            "Start from entry points and configuration, then core logic, then utilities. "
-            "Each step should say WHAT to look for, not just WHICH files. {lang}"
+            "Start from entry points and configuration, then core business logic and "
+            "data models, then supporting utilities. "
+            "Each step should say WHAT to look for and WHY it matters for understanding "
+            "the business and architecture, not just WHICH files. {lang}"
         ),
         "user": (
             "## File Importance Rankings (by PageRank)\n{rankings}\n\n"
@@ -126,7 +183,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
             '  "introduction": "brief intro on how to approach this codebase",\n'
             '  "steps": [\n'
             '    {"order": 1, "title": "step title", "files": ["file1.py", "file2.py"], '
-            '"explanation": "what to look for and why", "time_estimate": "5 min"}\n'
+            '"explanation": "what to look for and why it matters", "time_estimate": "5 min"}\n'
             '  ],\n'
             '  "tips": ["general tip 1", "general tip 2"]\n'
             "}\n\n"
@@ -138,7 +195,9 @@ DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
             "You are a knowledgeable developer answering questions about a codebase. "
             "Answer based on the actual code shown below, not general knowledge. "
             "Reference specific files and line numbers when relevant. "
-            "Be direct -- answer the question, don't give a lecture. {lang}"
+            "When asked about business logic, trace the code path and explain the "
+            "data flow. When asked about dependencies, cite where they're configured "
+            "and used. Be direct -- answer the question, don't give a lecture. {lang}"
         ),
         "user": "## Relevant Code\n{context_chunks}\n\n## Question\n{question}",
     },

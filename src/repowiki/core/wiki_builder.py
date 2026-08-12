@@ -112,6 +112,22 @@ class WikiBuilder:
                 lines.append(f"- {feat}")
             lines.append("")
 
+        if overview.business_cases:
+            lines.append("## Business Cases\n")
+            for bc in overview.business_cases:
+                lines.append(f"- {bc}")
+            lines.append("")
+
+        if overview.formulas:
+            lines.append("## Key Formulas\n")
+            for fm in overview.formulas:
+                lines.append(f"### {fm.name}\n" if fm.name else "")
+                if fm.expression:
+                    lines.append(f"```\n{fm.expression}\n```\n")
+                if fm.explanation:
+                    lines.append(f"{fm.explanation}\n")
+            lines.append("")
+
         if overview.setup_instructions:
             lines.append("## Getting Started\n")
             for i, step in enumerate(overview.setup_instructions, 1):
@@ -148,6 +164,24 @@ class WikiBuilder:
             lines.append("## Data Flow\n")
             lines.append(f"{arch.data_flow}\n")
 
+        if arch.service_dependencies:
+            lines.append("## Service Dependencies\n")
+            lines.append("External systems this project connects to at runtime:\n")
+            for d in arch.service_dependencies:
+                cat = f" ({d.category})" if d.category else ""
+                purpose = f" — {d.purpose}" if d.purpose else ""
+                lines.append(f"- **{d.name}**{cat}{purpose}")
+            lines.append("")
+
+        if arch.framework_dependencies:
+            lines.append("## Framework Dependencies\n")
+            lines.append("Libraries and frameworks the code is built on:\n")
+            for d in arch.framework_dependencies:
+                cat = f" ({d.category})" if d.category else ""
+                purpose = f" — {d.purpose}" if d.purpose else ""
+                lines.append(f"- **{d.name}**{cat}{purpose}")
+            lines.append("")
+
         return "\n".join(lines)
 
     def _build_module_page(self, mod) -> str:
@@ -179,6 +213,18 @@ class WikiBuilder:
             lines.append("## Internal Relationships\n")
             for r in mod.relationships:
                 lines.append(f"- `{r.source}` → `{r.target}`: {r.description}")
+            lines.append("")
+
+        if mod.potential_issues:
+            lines.append("## Potential Issues\n")
+            for issue in mod.potential_issues:
+                lines.append(f"- ⚠️ {issue}")
+            lines.append("")
+
+        if mod.optimization_points:
+            lines.append("## Optimization Points\n")
+            for opt in mod.optimization_points:
+                lines.append(f"- 💡 {opt}")
             lines.append("")
 
         return "\n".join(lines)
