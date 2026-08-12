@@ -207,12 +207,27 @@ def _template(key: str) -> tuple[str, str]:
 
 
 def _render(system_tpl: str, user_tpl: str, user_vars: dict, language: str) -> list[dict]:
-    """fill both templates. {lang} is reserved for the language instruction and is
-    injected automatically; user_vars must not contain a 'lang' key."""
-    ctx = {**user_vars, "lang": _lang_instruction(language), "json_instruction": _JSON_INSTRUCTION}
+    """fill both templates by substituting named {placeholders}.
+
+    Uses targeted string replacement rather than str.format() so that literal
+    braces in the template (e.g. JSON examples like {"name": ...}) are left
+    untouched. Only known variable names are substituted.
+    """
+    substitutions = {
+        **user_vars,
+        "lang": _lang_instruction(language),
+        "json_instruction": _JSON_INSTRUCTION,
+    }
+
+    def _fill(tpl: str) -> str:
+        result = tpl
+        for name, value in substitutions.items():
+            result = result.replace("{" + name + "}", value)
+        return result
+
     return [
-        {"role": "system", "content": system_tpl.format(**ctx)},
-        {"role": "user", "content": user_tpl.format(**ctx)},
+        {"role": "system", "content": _fill(system_tpl)},
+        {"role": "user", "content": _fill(user_tpl)},
     ]
 
 
