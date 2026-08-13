@@ -7,7 +7,7 @@ import json
 from fastapi import APIRouter, Header
 from fastapi.responses import StreamingResponse
 
-from repowiki.config import Config
+from repowiki.config import Config, resolve_model
 from repowiki.server.app import get_projects
 from repowiki.server.models import ChatRequest
 
@@ -51,17 +51,24 @@ async def chat(project_id: str, req: ChatRequest, x_api_key: str | None = Header
 
     context_text = "\n\n".join(context_parts)
 
-    # Resolve LLM config: prefer the model/api_base used at scan time (stored on
-    # the project entry), so chat stays consistent with how the wiki was built.
-    # Fall back to Config.load() defaults for legacy/older project entries.
+    # Resolve LLM config. Priority (highest first):
+    #   1. request body (what the user just picked in Settings)
+    #   2. scan-time snapshot stored on the project entry
+    #   3. Config.load() defaults (config file / env vars)
     saved = proj.get("llm_config") or {}
     cfg = Config.load()
+    # base layer: scan-time snapshot
     if saved.get("model"):
         cfg.model = saved["model"]
     if saved.get("api_base"):
         cfg.api_base = saved["api_base"]
     if saved.get("language"):
         cfg.language = saved["language"]
+    # top layer: request overrides (current Settings selection wins)
+    if req.model:
+        cfg.model = resolve_model(req.model)
+    if req.api_base:
+        cfg.api_base = req.api_base
     # api_key: header override > saved > config file / env
     if x_api_key:
         cfg.api_key = x_api_key

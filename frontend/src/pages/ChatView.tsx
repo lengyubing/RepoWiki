@@ -6,7 +6,7 @@ import { useWikiStore } from "../stores/wiki";
 export default function ChatView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { chatMessages, addChatMessage, appendToLastChat, setLastChatReferences } = useWikiStore();
+  const { chatMessages, addChatMessage, appendToLastChat, setLastChatReferences, settings } = useWikiStore();
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -38,6 +38,10 @@ export default function ChatView() {
         if (data.content) appendToLastChat(data.content);
       },
       () => setStreaming(false),
+      {
+        model: settings.model || undefined,
+        api_base: settings.apiBase || undefined,
+      },
     );
   }
 

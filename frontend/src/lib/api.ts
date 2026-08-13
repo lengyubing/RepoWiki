@@ -158,11 +158,15 @@ export function streamChat(
   question: string,
   onChunk: (data: any) => void,
   onDone: () => void,
+  opts?: { model?: string; api_base?: string },
 ) {
+  const body: Record<string, unknown> = { question };
+  if (opts?.model) body.model = opts.model;
+  if (opts?.api_base) body.api_base = opts.api_base;
   fetch(`${BASE}/project/${projectId}/chat`, {
     method: "POST",
     headers: getHeaders(),
-    body: JSON.stringify({ question }),
+    body: JSON.stringify(body),
   }).then(async (res) => {
     const reader = res.body?.getReader();
     const decoder = new TextDecoder();

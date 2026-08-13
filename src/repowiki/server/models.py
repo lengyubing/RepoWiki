@@ -28,6 +28,8 @@ class ProjectInfo(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     history: list[dict] = Field(default_factory=list)
+    model: str | None = None
+    api_base: str | None = None
 
 
 class FileReference(BaseModel):
