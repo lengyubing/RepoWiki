@@ -22,12 +22,17 @@ PROMPT_KEYS = ("overview", "module", "architecture", "reading_guide", "chat")
 
 def _lang_instruction(language: str) -> str:
     lang_map = {
-        "en": "Respond in English.",
-        "zh": "请用中文回答。",
-        "ja": "日本語で回答してください。",
-        "ko": "한국어로 답변해주세요.",
+        "en": "Write ALL output (descriptions, explanations, field values) in English.",
+        "zh": (
+            "重要：你必须用中文撰写全部输出内容，包括描述、解释、字段值。"
+            "JSON 的 key 保持英文，但所有 value（description、purpose、explanation 等）"
+            "必须用中文。代码片段、类名、函数名、文件路径保持原文不翻译。"
+            "绝对不要用英文写描述性内容。"
+        ),
+        "ja": "すべての出力内容（説明、フィールド値）を日本語で書いてください。JSONのキーは英語のまま、値は日本語にしてください。",
+        "ko": "모든 출력 내용(설명, 필드 값)을 한국어로 작성해 주세요. JSON 키는 영어로, 값은 한국어로.",
     }
-    return lang_map.get(language, "Respond in English.")
+    return lang_map.get(language, "Write ALL output in English.")
 
 
 _JSON_INSTRUCTION = (
@@ -83,11 +88,14 @@ DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
     },
     "module": {
         "system": (
-            "You are a senior engineer doing a thorough code review while documenting "
-            "your own code. Be direct and specific. No filler. "
+            "You are a senior engineer AND domain expert doing a thorough code review "
+            "while documenting your own code. Be direct, specific, and DEEP. No filler. "
             "For each module explain: what each file does, how files interact with "
-            "each other (call chains, data passing, events), and what the key "
-            "functions/classes are. "
+            "each other (call chains, data passing, events, message queues), and what "
+            "the key functions/classes are. "
+            "IMPORTANT: trace the core business logic end-to-end — what data enters, "
+            "how it's transformed, what business rules are applied, and what output "
+            "or side effects are produced. Explain WHY, not just WHAT. "
             "ALSO identify potential problems (bugs, race conditions, error-handling "
             "gaps, security risks, code smells) and concrete optimization points "
             "(performance, maintainability, scalability). Be honest and specific -- "
@@ -95,19 +103,25 @@ DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
         ),
         "user": (
             "Project: {project_summary}\n\n"
-            "Analyze the '{module_name}' module. Here are its files:\n\n"
+            "Analyze the '{module_name}' module IN DEPTH. Here are its files:\n\n"
             "{files_context}\n\n"
             "Output JSON:\n"
             "{\n"
             '  "name": "{module_name}",\n'
             '  "purpose": "one sentence on what this module is responsible for",\n'
-            '  "description": "detailed explanation of the module\'s role and how it works",\n'
+            '  "description": "detailed explanation of the module\'s role, business context, '
+            'and how it works end-to-end",\n'
+            '  "business_logic": "trace the core business flow step by step: what data/request '
+            'enters, how it\'s processed (transformations, business rules, validations), what '
+            'decisions are made, and what output/side-effects are produced. Reference specific '
+            'classes and methods.",\n'
             '  "files": [\n'
-            '    {"path": "file.py", "purpose": "what it does", '
-            '"key_symbols": [{"name": "func_name", "kind": "function", "description": "..."}]}\n'
+            '    {"path": "file.py", "purpose": "what it does in the business context", '
+            '"key_symbols": [{"name": "func_name", "kind": "function", "description": "detailed - '
+            'what it does, params, return value, business meaning"}]}\n'
             '  ],\n'
             '  "relationships": [{"source": "a.py", "target": "b.py", "description": "a calls b for..."}],\n'
-            '  "key_concepts": [{"name": "concept", "explanation": "..."}],\n'
+            '  "key_concepts": [{"name": "concept", "explanation": "detailed explanation with business context"}],\n'
             '  "potential_issues": [\n'
             '    "specific bug/risk with file and function reference, e.g. '
             "'user_service.py:login() has no rate limiting\"\n"
@@ -118,6 +132,11 @@ DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
             '  ]\n'
             "}\n\n"
             "Notes:\n"
+            "- business_logic: THIS IS THE MOST IMPORTANT FIELD. Do not skip it. Trace the "
+            "complete data/business flow with specific method names. For example, if this is "
+            "a trading module, explain: how an order enters, how strategy is selected, how "
+            "execution works, what market data is used, how state transitions happen.\n"
+            "- key_symbols: describe each symbol's business meaning, not just technical signature.\n"
             "- relationships: describe HOW files interact (who calls whom, data flow, "
             "event subscriptions), not just import edges.\n"
             "- potential_issues: be concrete and cite locations. Leave empty if truly none.\n"

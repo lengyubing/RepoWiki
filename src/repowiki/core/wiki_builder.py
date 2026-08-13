@@ -191,6 +191,10 @@ class WikiBuilder:
         if mod.description:
             lines.append(f"{mod.description}\n")
 
+        if mod.business_logic:
+            lines.append("## Business Logic & Data Flow\n")
+            lines.append(f"{mod.business_logic}\n")
+
         if mod.files:
             lines.append("## Files\n")
             for f in mod.files:

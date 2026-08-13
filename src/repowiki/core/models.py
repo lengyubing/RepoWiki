@@ -86,6 +86,7 @@ class ModuleDoc(BaseModel):
     name: str
     purpose: str = ""
     description: str = ""
+    business_logic: str = ""  # end-to-end business/data flow trace
     files: list[FileDoc] = Field(default_factory=list)
     relationships: list[Relationship] = Field(default_factory=list)
     key_concepts: list[Concept] = Field(default_factory=list)
