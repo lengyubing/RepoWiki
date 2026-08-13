@@ -13,6 +13,7 @@ export interface ScanRequest {
   language?: string;
   model?: string;
   api_base?: string;
+  supplementary_docs?: string;
 }
 
 export interface ProjectInfo {

@@ -25,6 +25,7 @@ class ProjectContext(BaseModel):
     root: str
     files: list[FileInfo] = Field(default_factory=list)
     file_tree: str = ""
+    supplementary_docs: str = ""  # user-provided business docs to enrich LLM context
 
     @property
     def total_lines(self) -> int:

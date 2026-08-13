@@ -120,7 +120,10 @@ class Analyzer:
             except Exception:
                 pass
 
-        messages = build_overview_prompt(project.file_tree, key_files, self.language)
+        messages = build_overview_prompt(
+            project.file_tree, key_files, self.language,
+            supplementary_docs=project.supplementary_docs,
+        )
         raw = await self.llm.complete(messages, max_tokens=4096)
         data = extract_json(raw)
         if not data or not isinstance(data, dict):
@@ -213,7 +216,10 @@ class Analyzer:
                 except Exception:
                     pass
 
-            messages = build_module_prompt(name, files_context, project_summary, self.language)
+            messages = build_module_prompt(
+                name, files_context, project_summary, self.language,
+                supplementary_docs=project.supplementary_docs,
+            )
             raw = await self.llm.complete(messages, max_tokens=4096)
             data = extract_json(raw)
             if not data or not isinstance(data, dict):
@@ -241,7 +247,10 @@ class Analyzer:
             except Exception:
                 pass
 
-        messages = build_architecture_prompt(project.file_tree, key_files, self.language)
+        messages = build_architecture_prompt(
+            project.file_tree, key_files, self.language,
+            supplementary_docs=project.supplementary_docs,
+        )
         raw = await self.llm.complete(messages, max_tokens=4096)
         data = extract_json(raw)
         if not data or not isinstance(data, dict):

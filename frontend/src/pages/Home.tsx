@@ -6,6 +6,8 @@ import SettingsModal from "../components/SettingsModal";
 
 export default function Home() {
   const [url, setUrl] = useState("");
+  const [showDocs, setShowDocs] = useState(false);
+  const [supplementaryDocs, setSupplementaryDocs] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [recentProjects, setRecentProjects] = useState<ProjectInfo[]>([]);
   const { loading, setLoading, scanProgress, addProgress, setProjectId, setProject, setWiki, setError, reset, settings } = useWikiStore();
@@ -119,6 +121,7 @@ export default function Home() {
         language: settings.language,
         model: settings.model || undefined,
         api_base: settings.apiBase || undefined,
+        supplementary_docs: supplementaryDocs.trim() || undefined,
       });
       setProjectId(info.id);
       setProject(info);
@@ -200,6 +203,33 @@ export default function Home() {
             >
               {loading ? "Scanning..." : "Generate Wiki"}
             </button>
+          </div>
+
+          {/* supplementary docs toggle */}
+          <div className="mt-3">
+            <button
+              onClick={() => setShowDocs(!showDocs)}
+              className="text-sm text-slate-500 hover:text-blue-600 transition-colors"
+            >
+              {showDocs ? "▾" : "▸"} Add supplementary docs (business context, domain terms, specs)
+            </button>
+            {showDocs && (
+              <textarea
+                value={supplementaryDocs}
+                onChange={(e) => setSupplementaryDocs(e.target.value)}
+                placeholder={
+                  "Paste business documentation, domain glossary, product specs, or process descriptions...\n\n" +
+                  "Example:\n" +
+                  "- POV (Percentage of Volume) is an execution strategy that splits a large order into child orders.\n" +
+                  "- TWAP splits orders evenly across time periods.\n" +
+                  "- '限价单' = limit order, '市价单' = market order\n" +
+                  "- Basket = a group of orders traded together as a unit."
+                }
+                className="mt-2 w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none text-sm text-slate-700 font-mono resize-y"
+                rows={6}
+                disabled={loading}
+              />
+            )}
           </div>
 
           {/* progress display */}

@@ -245,6 +245,11 @@ async def _run_scan(project_id: str, req: ScanRequest, user_api_key: str | None)
         proj["info"].total_files = len(project.files)
         proj["info"].total_lines = project.total_lines
 
+        # attach user-provided supplementary docs so the analyzer can enrich
+        # its LLM context with business terminology and domain rules.
+        if req.supplementary_docs:
+            project.supplementary_docs = req.supplementary_docs
+
         # check if we have an API key
         if not cfg.api_key:
             proj["info"].status = "error"

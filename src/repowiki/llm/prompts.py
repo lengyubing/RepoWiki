@@ -60,29 +60,40 @@ DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
             "new or changed (incremental); otherwise analyze the full codebase.\n\n"
             "## File Tree\n```\n{file_tree}\n```\n\n"
             "## Key Files\n{key_files}\n\n"
+            "{supplementary_docs}"
             "Generate a project overview as JSON with this structure:\n"
             "{\n"
             '  "name": "project name",\n'
             '  "one_liner": "what this project does in one sentence (max 20 words)",\n'
-            '  "description": "2-3 paragraphs: business background, what problem it '
-            'solves, and the overall technical approach",\n'
+            '  "description": "3-4 paragraphs covering: (1) business background and what '
+            'problem it solves, (2) the end-to-end business flow — how a request enters, '
+            'what processing stages it goes through, and what the output is, (3) the core '
+            'data entities and how they flow through the system",\n'
             '  "tech_stack": [{"name": "Python", "category": "language|framework|database|tool", "version": "3.10+"}],\n'
             '  "setup_instructions": ["step 1", "step 2"],\n'
             '  "key_features": ["core feature 1", "core feature 2"],\n'
             '  "business_cases": [\n'
-            '    "main user-facing use case / business scenario 1",\n'
-            '    "main user-facing use case / business scenario 2"\n'
+            '    "detailed business scenario: the trigger, the flow, the actors involved, '
+            'and the outcome",\n'
             '  ],\n'
             '  "formulas": [\n'
             '    {"name": "formula name", "expression": "score = tf * log(N / df)", '
-            '"explanation": "what it computes and why it matters"}\n'
+            '"explanation": "what it computes, each variable\'s meaning, and why it matters '
+            'to the business"}\n'
             '  ]\n'
             "}\n\n"
             "Notes:\n"
-            "- business_cases: list the main business workflows / user scenarios the "
-            "code supports, derived from entry points, routes, and core logic.\n"
-            "- formulas: only include IMPORTANT formulas (ranking, scoring, pricing, "
-            "ML metrics, core algorithms). Leave the array empty if there are none.\n"
+            "- description: MUST trace the business flow end-to-end. Don't just list features — "
+            "explain how the system works as a process. Reference the supplementary docs if provided "
+            "to map code concepts to business terminology.\n"
+            "- business_cases: describe each scenario as a FLOW (trigger → processing → outcome), "
+            "not just a one-liner. Include the actors (who/what triggers it) and the business meaning.\n"
+            "- formulas: include ALL important formulas (trading strategies, pricing, scoring, "
+            "risk calculations, ML metrics). For each, explain every variable and the business context. "
+            "Leave empty only if there are genuinely none.\n"
+            "- If supplementary documentation is provided, USE IT to enrich your understanding. "
+            "It may contain business terms, domain rules, or process descriptions that aren't obvious "
+            "from code alone. Bridge the gap between code identifiers and business language.\n"
             "{json_instruction}"
         ),
     },
@@ -103,6 +114,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
         ),
         "user": (
             "Project: {project_summary}\n\n"
+            "{supplementary_docs}"
             "Analyze the '{module_name}' module IN DEPTH. Here are its files:\n\n"
             "{files_context}\n\n"
             "Output JSON:\n"
@@ -156,6 +168,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
         "user": (
             "## File Tree\n```\n{file_tree}\n```\n\n"
             "## Key Files\n{key_files}\n\n"
+            "{supplementary_docs}"
             "Analyze the architecture. Output JSON:\n"
             "{\n"
             '  "architecture_type": "one of: monolith, client-server, microservices, library, cli-tool, framework, plugin-system, pipeline",\n'
@@ -314,9 +327,32 @@ def _render(system_tpl: str, user_tpl: str, user_vars: dict, language: str) -> l
     ]
 
 
-def build_overview_prompt(file_tree: str, key_files: str, language: str = "en") -> list[dict]:
+def _fmt_supplementary(docs: str) -> str:
+    """format supplementary docs into a prompt section, or empty string."""
+    docs = (docs or "").strip()
+    if not docs:
+        return ""
+    return (
+        "## Supplementary Documentation (user-provided business context)\n"
+        "The user provided the following documentation to help understand this project. "
+        "It may contain business terminology, domain rules, process descriptions, or "
+        "product specs that aren't obvious from the code. Use it to bridge code "
+        "identifiers and business concepts.\n\n"
+        f"{docs}\n\n"
+    )
+
+
+def build_overview_prompt(
+    file_tree: str, key_files: str, language: str = "en", supplementary_docs: str = ""
+) -> list[dict]:
     system_tpl, user_tpl = _template("overview")
-    return _render(system_tpl, user_tpl, {"file_tree": file_tree, "key_files": key_files}, language)
+    return _render(
+        system_tpl,
+        user_tpl,
+        {"file_tree": file_tree, "key_files": key_files,
+         "supplementary_docs": _fmt_supplementary(supplementary_docs)},
+        language,
+    )
 
 
 def build_module_prompt(
@@ -324,12 +360,15 @@ def build_module_prompt(
     files_context: str,
     project_summary: str,
     language: str = "en",
+    supplementary_docs: str = "",
 ) -> list[dict]:
     system_tpl, user_tpl = _template("module")
     return _render(
         system_tpl,
         user_tpl,
-        {"module_name": module_name, "files_context": files_context, "project_summary": project_summary},
+        {"module_name": module_name, "files_context": files_context,
+         "project_summary": project_summary,
+         "supplementary_docs": _fmt_supplementary(supplementary_docs)},
         language,
     )
 
@@ -338,9 +377,16 @@ def build_architecture_prompt(
     file_tree: str,
     key_files: str,
     language: str = "en",
+    supplementary_docs: str = "",
 ) -> list[dict]:
     system_tpl, user_tpl = _template("architecture")
-    return _render(system_tpl, user_tpl, {"file_tree": file_tree, "key_files": key_files}, language)
+    return _render(
+        system_tpl,
+        user_tpl,
+        {"file_tree": file_tree, "key_files": key_files,
+         "supplementary_docs": _fmt_supplementary(supplementary_docs)},
+        language,
+    )
 
 
 def build_reading_guide_prompt(
