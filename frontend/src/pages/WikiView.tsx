@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getWiki, getPage, reanalyzeProject, deleteProject, streamScanProgress, getWiki as fetchWiki } from "../lib/api";
+import { getWiki, getPage, reanalyzeProject, deleteProject, getProjectInfo } from "../lib/api";
 import { useWikiStore } from "../stores/wiki";
 import WikiSidebar from "../components/WikiSidebar";
 import WikiContent from "../components/WikiContent";
@@ -14,6 +14,7 @@ export default function WikiView() {
   const [loading, setLoading] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
   const [reanalyzeMsg, setReanalyzeMsg] = useState("");
+  const timerRef = useRef<number | undefined>(undefined);
 
   // load wiki structure if not already loaded
   useEffect(() => {
@@ -55,27 +56,35 @@ export default function WikiView() {
   async function handleReanalyze() {
     if (!id || reanalyzing) return;
     setReanalyzing(true);
-    setReanalyzeMsg("Re-analyzing...");
+    setReanalyzeMsg("Starting re-analysis...");
     try {
       await reanalyzeProject(id);
-      // stream progress, then reload wiki when done
-      streamScanProgress(
-        id,
-        (step) => setReanalyzeMsg(step),
-        async (status) => {
-          if (status === "done") {
-            const fresh = await fetchWiki(id);
+      // poll status until done/error — more reliable than SSE for short tasks
+      const poll = async () => {
+        try {
+          const info = await getProjectInfo(id);
+          if (info.status === "done") {
+            const fresh = await getWiki(id);
             setWiki(fresh);
             setReanalyzing(false);
             setReanalyzeMsg("");
-            // reload current page content
-            setCurrentPage(currentPageId);
-          } else {
-            setReanalyzing(false);
-            setReanalyzeMsg("Re-analysis failed");
+            setCurrentPage(currentPageId);  // reload page content
+            return;
           }
-        },
-      );
+          if (info.status === "error") {
+            setReanalyzing(false);
+            setReanalyzeMsg("Re-analysis failed: " + (info.error || "unknown error"));
+            return;
+          }
+          // still running — show a status message and keep polling
+          setReanalyzeMsg(`Re-analyzing... (${info.status})`);
+          timerRef.current = window.setTimeout(poll, 1500);
+        } catch {
+          setReanalyzing(false);
+          setReanalyzeMsg("Lost connection to server");
+        }
+      };
+      timerRef.current = window.setTimeout(poll, 1000);
     } catch (e: any) {
       setReanalyzing(false);
       setReanalyzeMsg("Error: " + e.message);

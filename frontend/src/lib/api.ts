@@ -143,6 +143,11 @@ export async function getWiki(projectId: string): Promise<WikiStructure> {
   return res.json();
 }
 
+export async function getProjectInfo(projectId: string): Promise<ProjectInfo> {
+  const res = await fetch(`${BASE}/project/${projectId}`, { headers: getHeaders() });
+  return res.json();
+}
+
 export async function getPage(projectId: string, pageId: string): Promise<WikiPage> {
   const res = await fetch(`${BASE}/project/${projectId}/wiki/${pageId}`, { headers: getHeaders() });
   return res.json();

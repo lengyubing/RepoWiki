@@ -25,7 +25,6 @@ def create_app():
     try:
         from fastapi import FastAPI
         from fastapi.middleware.cors import CORSMiddleware
-        from fastapi.staticfiles import StaticFiles
     except ImportError:
         raise RuntimeError(
             "FastAPI not installed. Run: pip install repowiki[web]"
@@ -83,8 +82,21 @@ def create_app():
 
     # serve embedded frontend (if built)
     from pathlib import Path
+
+    from starlette.responses import FileResponse
+
     static_dir = Path(__file__).parent / "static"
     if static_dir.is_dir():
-        app.mount("/", StaticFiles(directory=str(static_dir), html=True))
+        index_html = static_dir / "index.html"
+
+        # SPA fallback: any non-/api GET route that doesn't match a real static
+        # file returns index.html so React Router can handle client-side routes.
+        # Without this, refreshing /project/xxx returns 404.
+        @app.get("/{full_path:path}")
+        async def spa_fallback(full_path: str):
+            candidate = static_dir / full_path
+            if full_path and candidate.is_file():
+                return FileResponse(str(candidate))
+            return FileResponse(str(index_html))
 
     return app
