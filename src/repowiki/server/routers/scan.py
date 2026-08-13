@@ -249,6 +249,8 @@ async def _run_scan(project_id: str, req: ScanRequest, user_api_key: str | None)
         # its LLM context with business terminology and domain rules.
         if req.supplementary_docs:
             project.supplementary_docs = req.supplementary_docs
+        if req.custom_instructions:
+            project.custom_instructions = req.custom_instructions
 
         # check if we have an API key
         if not cfg.api_key:

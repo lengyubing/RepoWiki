@@ -8,6 +8,8 @@ export default function Home() {
   const [url, setUrl] = useState("");
   const [showDocs, setShowDocs] = useState(false);
   const [supplementaryDocs, setSupplementaryDocs] = useState("");
+  const [showInstructions, setShowInstructions] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [recentProjects, setRecentProjects] = useState<ProjectInfo[]>([]);
   const { loading, setLoading, scanProgress, addProgress, setProjectId, setProject, setWiki, setError, reset, settings } = useWikiStore();
@@ -122,6 +124,7 @@ export default function Home() {
         model: settings.model || undefined,
         api_base: settings.apiBase || undefined,
         supplementary_docs: supplementaryDocs.trim() || undefined,
+        custom_instructions: customInstructions.trim() || undefined,
       });
       setProjectId(info.id);
       setProject(info);
@@ -227,6 +230,33 @@ export default function Home() {
                 }
                 className="mt-2 w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none text-sm text-slate-700 font-mono resize-y"
                 rows={6}
+                disabled={loading}
+              />
+            )}
+          </div>
+
+          {/* custom instructions toggle */}
+          <div className="mt-3">
+            <button
+              onClick={() => setShowInstructions(!showInstructions)}
+              className="text-sm text-slate-500 hover:text-blue-600 transition-colors"
+            >
+              {showInstructions ? "▾" : "▸"} Add custom instructions (special requirements for this scan)
+            </button>
+            {showInstructions && (
+              <textarea
+                value={customInstructions}
+                onChange={(e) => setCustomInstructions(e.target.value)}
+                placeholder={
+                  "针对本次扫描的特别要求，会追加到每个 LLM 提示词中...\n\n" +
+                  "示例：\n" +
+                  "- 重点分析风控和资金管理逻辑\n" +
+                  "- 忽略测试代码和示例代码\n" +
+                  "- 特别关注线程安全和并发问题\n" +
+                  "- 用交易领域的专业术语解释"
+                }
+                className="mt-2 w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none text-sm text-slate-700 resize-y"
+                rows={4}
                 disabled={loading}
               />
             )}

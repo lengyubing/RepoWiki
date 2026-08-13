@@ -36,207 +36,192 @@ def _lang_instruction(language: str) -> str:
 
 
 _JSON_INSTRUCTION = (
-    "Output ONLY valid JSON. No markdown fences, no explanation text before or after. "
-    "Just the JSON object/array."
+    "只输出合法的 JSON，不要加 markdown 代码围栏，不要在 JSON 前后加任何解释文字，"
+    "只输出 JSON 对象本身。"
 )
 
-# Default templates. {lang} is always filled last (after user content), so the
-# user-facing templates expose the domain variables ({file_tree}, etc.) while the
-# language tag is injected uniformly.
+# 代码安全约束：wiki 是文档库，不是代码仓库。
+# 可以引用代码片段说明逻辑，但不得大段原样输出源码。
+_CODE_SAFETY = (
+    "重要：这是技术文档，不是代码仓库。你可以在描述中引用简短的代码片段（3-5行）"
+    "来解释关键逻辑，但绝对不要把整份源码或大段代码（超过10行）原样复制到文档中。"
+    "要看完整代码的读者应该自己去拉取代码。你的职责是解释和理解，不是搬运代码。"
+)
+
+# Default templates. Placeholders: {lang}, {json_instruction}, {code_safety},
+# {custom_instructions} are auto-injected; domain variables ({file_tree}, etc.)
+# are filled by each builder.
 DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
     "overview": {
         "system": (
-            "You are a senior software engineer and business analyst explaining a "
-            "project to a new team member. Focus on BOTH the business perspective "
-            "(what problem it solves, who uses it, main use cases) and the technical "
-            "perspective (architecture, tech stack). Be direct, specific, and concrete. "
-            "Do NOT use filler phrases like 'leveraging', 'utilizing', 'cutting-edge', "
-            "'robust', or 'comprehensive'. Just describe what things do. "
-            "If the project involves important formulas (scoring, ranking, pricing, "
-            "ML loss functions, etc.), extract and explain them. {lang}"
+            "你是一位资深软件工程师和业务分析师，正在向新团队成员介绍一个项目。"
+            "你需要同时从业务视角（解决什么问题、谁在使用、核心用例）和技术视角"
+            "（架构、技术栈）来分析项目。要直接、具体、言之有物，不要用空话套话。"
+            "如果项目涉及重要公式（评分、排序、定价、风控、机器学习指标等），"
+            "务必提取并解释。{code_safety}"
+            "{custom_instructions}"
+            "{lang}"
         ),
         "user": (
-            "Analyze this project's code. If a previous scan exists, focus on what's "
-            "new or changed (incremental); otherwise analyze the full codebase.\n\n"
-            "## File Tree\n```\n{file_tree}\n```\n\n"
-            "## Key Files\n{key_files}\n\n"
+            "分析这个项目的代码。如果之前已扫描过，重点关注新增或变更部分。\n\n"
+            "## 文件树\n```\n{file_tree}\n```\n\n"
+            "## 关键文件\n{key_files}\n\n"
             "{supplementary_docs}"
-            "Generate a project overview as JSON with this structure:\n"
+            "生成项目概览，输出 JSON：\n"
             "{\n"
-            '  "name": "project name",\n'
-            '  "one_liner": "what this project does in one sentence (max 20 words)",\n'
-            '  "description": "3-4 paragraphs covering: (1) business background and what '
-            'problem it solves, (2) the end-to-end business flow — how a request enters, '
-            'what processing stages it goes through, and what the output is, (3) the core '
-            'data entities and how they flow through the system",\n'
+            '  "name": "项目名称",\n'
+            '  "one_liner": "一句话描述项目做什么（不超过20字）",\n'
+            '  "description": "3-4段：(1) 业务背景和解决的问题，(2) 端到端业务流程——'
+            '请求如何进入、经过哪些处理阶段、最终输出什么，(3) 核心数据实体及其在系统中的流转",\n'
             '  "tech_stack": [{"name": "Python", "category": "language|framework|database|tool", "version": "3.10+"}],\n'
-            '  "setup_instructions": ["step 1", "step 2"],\n'
-            '  "key_features": ["core feature 1", "core feature 2"],\n'
+            '  "setup_instructions": ["步骤1", "步骤2"],\n'
+            '  "key_features": ["核心功能1", "核心功能2"],\n'
             '  "business_cases": [\n'
-            '    "detailed business scenario: the trigger, the flow, the actors involved, '
-            'and the outcome",\n'
+            '    "详细的业务场景：触发条件、流程、参与者、结果",\n'
             '  ],\n'
             '  "formulas": [\n'
-            '    {"name": "formula name", "expression": "score = tf * log(N / df)", '
-            '"explanation": "what it computes, each variable\'s meaning, and why it matters '
-            'to the business"}\n'
+            '    {"name": "公式名称", "expression": "score = tf * log(N / df)", '
+            '"explanation": "计算什么、每个变量的含义、业务上为什么重要"}\n'
             '  ]\n'
             "}\n\n"
-            "Notes:\n"
-            "- description: MUST trace the business flow end-to-end. Don't just list features — "
-            "explain how the system works as a process. Reference the supplementary docs if provided "
-            "to map code concepts to business terminology.\n"
-            "- business_cases: describe each scenario as a FLOW (trigger → processing → outcome), "
-            "not just a one-liner. Include the actors (who/what triggers it) and the business meaning.\n"
-            "- formulas: include ALL important formulas (trading strategies, pricing, scoring, "
-            "risk calculations, ML metrics). For each, explain every variable and the business context. "
-            "Leave empty only if there are genuinely none.\n"
-            "- If supplementary documentation is provided, USE IT to enrich your understanding. "
-            "It may contain business terms, domain rules, or process descriptions that aren't obvious "
-            "from code alone. Bridge the gap between code identifiers and business language.\n"
-            "{json_instruction}"
+            "要求：\n"
+            "- description：必须追踪端到端业务流程，不要只列举功能。"
+            "如果有补充文档，用它来建立代码概念和业务术语之间的映射。\n"
+            "- business_cases：把每个场景描述为一个流程（触发→处理→结果），包含参与者和业务含义。\n"
+            "- formulas：包含所有重要公式（交易策略、定价、评分、风控、ML指标）。"
+            "逐一解释每个变量和业务上下文。确实没有才留空。\n"
+            "- 如果提供了补充文档，必须用它来丰富理解——它可能包含代码里看不出来的"
+            "业务术语、领域规则或流程描述。{json_instruction}"
         ),
     },
     "module": {
         "system": (
-            "You are a senior engineer AND domain expert doing a thorough code review "
-            "while documenting your own code. Be direct, specific, and DEEP. No filler. "
-            "For each module explain: what each file does, how files interact with "
-            "each other (call chains, data passing, events, message queues), and what "
-            "the key functions/classes are. "
-            "IMPORTANT: trace the core business logic end-to-end — what data enters, "
-            "how it's transformed, what business rules are applied, and what output "
-            "or side effects are produced. Explain WHY, not just WHAT. "
-            "ALSO identify potential problems (bugs, race conditions, error-handling "
-            "gaps, security risks, code smells) and concrete optimization points "
-            "(performance, maintainability, scalability). Be honest and specific -- "
-            "cite file/function names. {lang}"
+            "你是一位资深工程师兼领域专家，正在做深入的代码审查并撰写文档。"
+            "要直接、具体、有深度，不要空话。"
+            "对每个模块解释：每个文件做什么、文件之间如何交互（调用链、数据传递、"
+            "事件、消息队列）、关键函数/类是什么。"
+            "重要：追踪核心业务逻辑的端到端流程——什么数据进入、如何转换、"
+            "应用了什么业务规则、产出什么结果或副作用。解释「为什么」，不只是「是什么」。"
+            "同时识别潜在问题（bug、竞态条件、异常处理缺陷、安全风险、代码异味）"
+            "和具体的优化建议（性能、可维护性、可扩展性）。要诚实、具体，引用文件名和函数名。"
+            "{code_safety}"
+            "{custom_instructions}"
+            "{lang}"
         ),
         "user": (
-            "Project: {project_summary}\n\n"
+            "项目：{project_summary}\n\n"
             "{supplementary_docs}"
-            "Analyze the '{module_name}' module IN DEPTH. Here are its files:\n\n"
+            "深入分析 '{module_name}' 模块。以下是它的文件：\n\n"
             "{files_context}\n\n"
-            "Output JSON:\n"
+            "输出 JSON：\n"
             "{\n"
             '  "name": "{module_name}",\n'
-            '  "purpose": "one sentence on what this module is responsible for",\n'
-            '  "description": "detailed explanation of the module\'s role, business context, '
-            'and how it works end-to-end",\n'
-            '  "business_logic": "trace the core business flow step by step: what data/request '
-            'enters, how it\'s processed (transformations, business rules, validations), what '
-            'decisions are made, and what output/side-effects are produced. Reference specific '
-            'classes and methods.",\n'
+            '  "purpose": "一句话说明该模块的职责",\n'
+            '  "description": "详细说明模块的角色、业务背景、端到端工作方式",\n'
+            '  "business_logic": "逐步追踪核心业务流程：什么数据/请求进入，如何处理'
+            '（转换、业务规则、校验），做了什么决策，产出什么结果/副作用。引用具体的类和方法名。",\n'
             '  "files": [\n'
-            '    {"path": "file.py", "purpose": "what it does in the business context", '
-            '"key_symbols": [{"name": "func_name", "kind": "function", "description": "detailed - '
-            'what it does, params, return value, business meaning"}]}\n'
+            '    {"path": "file.py", "purpose": "在业务上下文中做什么", '
+            '"key_symbols": [{"name": "func_name", "kind": "function", "description": '
+            '"详细说明：做什么、参数、返回值、业务含义"}]}\n'
             '  ],\n'
-            '  "relationships": [{"source": "a.py", "target": "b.py", "description": "a calls b for..."}],\n'
-            '  "key_concepts": [{"name": "concept", "explanation": "detailed explanation with business context"}],\n'
+            '  "relationships": [{"source": "a.py", "target": "b.py", "description": "a 调用 b 来..."}],\n'
+            '  "key_concepts": [{"name": "概念名", "explanation": "结合业务上下文的详细解释"}],\n'
             '  "potential_issues": [\n'
-            '    "specific bug/risk with file and function reference, e.g. '
-            "'user_service.py:login() has no rate limiting\"\n"
+            '    "具体的问题/风险，引用文件和函数，例如：user_service.py:login() 没有限流"\n'
             '  ],\n'
             '  "optimization_points": [\n'
-            '    "specific improvement suggestion with file reference, e.g. '
-            "'db.py:query() runs N+1 queries, batch them\"\n"
+            '    "具体的改进建议，引用文件，例如：db.py:query() 存在 N+1 查询，应批量处理"\n'
             '  ]\n'
             "}\n\n"
-            "Notes:\n"
-            "- business_logic: THIS IS THE MOST IMPORTANT FIELD. Do not skip it. Trace the "
-            "complete data/business flow with specific method names. For example, if this is "
-            "a trading module, explain: how an order enters, how strategy is selected, how "
-            "execution works, what market data is used, how state transitions happen.\n"
-            "- key_symbols: describe each symbol's business meaning, not just technical signature.\n"
-            "- relationships: describe HOW files interact (who calls whom, data flow, "
-            "event subscriptions), not just import edges.\n"
-            "- potential_issues: be concrete and cite locations. Leave empty if truly none.\n"
-            "- optimization_points: actionable improvements. Leave empty if none.\n"
-            "{json_instruction}"
+            "要求：\n"
+            "- business_logic：这是最重要的字段，不可跳过。用具体方法名追踪完整的"
+            "数据/业务流程。例如交易模块：订单如何进入、策略如何选择、执行如何工作、"
+            "行情数据如何使用、状态如何转换。\n"
+            "- key_symbols：描述每个符号的业务含义，不只是技术签名。\n"
+            "- relationships：描述文件之间如何交互（谁调用谁、数据流向、事件订阅），"
+            "不只是 import 关系。\n"
+            "- potential_issues：具体并引用位置。确实没有才留空。\n"
+            "- optimization_points：可操作的改进建议。确实没有才留空。{json_instruction}"
         ),
     },
     "architecture": {
         "system": (
-            "You are a software architect analyzing a codebase. "
-            "Identify the architecture pattern, map out components and their interactions, "
-            "describe the main data flow, and inventory ALL external dependencies "
-            "(services the app talks to: databases, caches, message queues, third-party "
-            "APIs; and frameworks/libraries it's built on: web framework, ORM, etc.). "
-            "Generate valid Mermaid diagrams with simple node names. {lang}"
+            "你是一位软件架构师，正在分析一个代码库。"
+            "识别架构模式、梳理组件及其交互方式、描述主数据流、"
+            "盘点所有外部依赖（运行时连接的服务：数据库、缓存、消息队列、第三方API；"
+            "以及构建所用的框架/库：Web框架、ORM等）。"
+            "生成合法的 Mermaid 图表，使用简单的节点名。{code_safety}"
+            "{custom_instructions}"
+            "{lang}"
         ),
         "user": (
-            "## File Tree\n```\n{file_tree}\n```\n\n"
-            "## Key Files\n{key_files}\n\n"
+            "## 文件树\n```\n{file_tree}\n```\n\n"
+            "## 关键文件\n{key_files}\n\n"
             "{supplementary_docs}"
-            "Analyze the architecture. Output JSON:\n"
+            "分析架构。输出 JSON：\n"
             "{\n"
-            '  "architecture_type": "one of: monolith, client-server, microservices, library, cli-tool, framework, plugin-system, pipeline",\n'
-            '  "description": "explain the architecture, component interactions, and '
-            'request/data flow in 2-4 sentences",\n'
+            '  "architecture_type": "monolith/client-server/microservices/library/cli-tool/framework/plugin-system/pipeline 之一",\n'
+            '  "description": "解释架构、组件交互、请求/数据流（2-4句）",\n'
             '  "components": [{"name": "...", "purpose": "...", "files": ["..."]}],\n'
-            '  "mermaid_component": "graph TD\\n  A[Component] --> B[Component]\\n  ...",\n'
-            '  "mermaid_sequence": "sequenceDiagram\\n  participant A\\n  A->>B: request\\n  ...",\n'
-            '  "data_flow": "describe the main data flow end-to-end: where data enters, '
-            'how it transforms, where it persists",\n'
+            '  "mermaid_component": "graph TD\\n  A[组件] --> B[组件]\\n  ...",\n'
+            '  "mermaid_sequence": "sequenceDiagram\\n  participant A\\n  A->>B: 请求\\n  ...",\n'
+            '  "data_flow": "端到端描述主数据流：数据从哪进入、如何转换、持久化到哪里",\n'
             '  "service_dependencies": [\n'
             '    {"name": "PostgreSQL", "category": "database|cache|message-queue|'
-            'search|third-party-api|object-storage", "purpose": "primary transactional store"}\n'
+            'search|third-party-api|object-storage", "purpose": "主事务存储"}\n'
             '  ],\n'
             '  "framework_dependencies": [\n'
             '    {"name": "FastAPI", "category": "web-framework|orm|task-queue|'
-            'auth|serialization|testing", "purpose": "serves the REST API"}\n'
+            'auth|serialization|testing", "purpose": "提供 REST API"}\n'
             '  ]\n'
             "}\n\n"
-            "IMPORTANT: Mermaid code must be a single string with \\n for newlines. "
-            "Use simple alphanumeric node IDs.\n"
-            "Notes:\n"
-            "- service_dependencies: external systems the code connects to at runtime "
-            "(read from config, connection code, env vars).\n"
-            "- framework_dependencies: libraries/frameworks the code is built on "
-            "(read from package files, imports).\n"
+            "重要：Mermaid 代码必须是单个字符串，用 \\n 表示换行。使用简单的字母数字节点ID。\n"
+            "- service_dependencies：运行时连接的外部系统（从配置、连接代码、环境变量中识别）。\n"
+            "- framework_dependencies：构建所用的库/框架（从依赖文件、import 中识别）。"
             "{json_instruction}"
         ),
     },
     "reading_guide": {
         "system": (
-            "You are a mentor helping a developer understand a new codebase. "
-            "Create a reading guide: which files to read, in what order, and why. "
-            "Start from entry points and configuration, then core business logic and "
-            "data models, then supporting utilities. "
-            "Each step should say WHAT to look for and WHY it matters for understanding "
-            "the business and architecture, not just WHICH files. {lang}"
+            "你是一位导师，帮助开发者理解一个新代码库。"
+            "创建一份阅读指南：先读哪些文件、按什么顺序、为什么。"
+            "从入口点和配置开始，然后是核心业务逻辑和数据模型，最后是辅助工具。"
+            "每一步要说清楚「看什么」和「为什么重要」，而不只是「看哪个文件」。"
+            "{code_safety}"
+            "{custom_instructions}"
+            "{lang}"
         ),
         "user": (
-            "## File Importance Rankings (by PageRank)\n{rankings}\n\n"
-            "## Module Summaries\n{module_summaries}\n\n"
-            "Create a reading guide with 5-10 steps. Output JSON:\n"
+            "## 文件重要性排名（按 PageRank）\n{rankings}\n\n"
+            "## 模块摘要\n{module_summaries}\n\n"
+            "创建一份 5-10 步的阅读指南。输出 JSON：\n"
             "{\n"
-            '  "introduction": "brief intro on how to approach this codebase",\n'
+            '  "introduction": "简要介绍如何入手这个代码库",\n'
             '  "steps": [\n'
-            '    {"order": 1, "title": "step title", "files": ["file1.py", "file2.py"], '
-            '"explanation": "what to look for and why it matters", "time_estimate": "5 min"}\n'
+            '    {"order": 1, "title": "步骤标题", "files": ["file1.py", "file2.py"], '
+            '"explanation": "看什么、为什么重要", "time_estimate": "5分钟"}\n'
             '  ],\n'
-            '  "tips": ["general tip 1", "general tip 2"]\n'
+            '  "tips": ["通用建议1", "通用建议2"]\n'
             "}\n\n"
             "{json_instruction}"
         ),
     },
     "chat": {
         "system": (
-            "You are a knowledgeable developer answering questions about a codebase. "
-            "The context below may include TWO sections:\n"
-            "1. 'Wiki Analysis' — previously generated business-logic analysis that traces "
-            "cross-file data flows and business rules. USE THIS as the primary source for "
-            "business logic, data flow, and 'how does X work' questions.\n"
-            "2. 'Relevant Code' — raw code snippets retrieved by keyword match. Use these "
-            "for specific implementation details, variable names, and line-level references.\n"
-            "Answer based on the context provided, not general knowledge. Reference specific "
-            "files, methods, and line numbers when relevant. When asked about business logic, "
-            "trace the complete flow step by step: what triggers it, what data is used, what "
-            "decisions/branches exist, and what the outcome is. Be thorough but direct. {lang}"
+            "你是一位资深开发者，正在回答关于某个代码库的问题。"
+            "下方的上下文可能包含两部分：\n"
+            "1.「Wiki 分析」——之前生成的业务逻辑分析，追踪了跨文件的数据流和业务规则。"
+            "回答业务逻辑、数据流、「X 是怎么工作的」这类问题时，以此为主要信息来源。\n"
+            "2.「相关代码」——按关键词检索到的原始代码片段。"
+            "用于具体的实现细节、变量名、行号引用。\n"
+            "基于提供的上下文回答，不要凭空泛知识。引用具体的文件、方法、行号。"
+            "被问到业务逻辑时，逐步追踪完整流程：什么触发它、用了什么数据、"
+            "有哪些分支决策、结果是什么。要全面但直接。{code_safety}"
+            "{custom_instructions}"
+            "{lang}"
         ),
-        "user": "{context_chunks}\n\n## Question\n{question}",
+        "user": "{context_chunks}\n\n## 问题\n{question}",
     },
 }
 
@@ -268,7 +253,6 @@ def get_effective_prompts() -> dict[str, dict[str, str]]:
 def save_custom_prompts(prompts: dict) -> None:
     """persist user prompt overrides to ~/.repowiki/prompts.json."""
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    # only keep recognized keys/roles, and only keep non-default values
     clean: dict[str, dict[str, str]] = {}
     for key in PROMPT_KEYS:
         entry = prompts.get(key)
@@ -302,17 +286,25 @@ def _template(key: str) -> tuple[str, str]:
     return entry["system"], entry["user"]
 
 
-def _render(system_tpl: str, user_tpl: str, user_vars: dict, language: str) -> list[dict]:
+def _render(
+    system_tpl: str, user_tpl: str, user_vars: dict, language: str,
+    custom_instructions: str = "",
+) -> list[dict]:
     """fill both templates by substituting named {placeholders}.
 
     Uses targeted string replacement rather than str.format() so that literal
     braces in the template (e.g. JSON examples like {"name": ...}) are left
     untouched. Only known variable names are substituted.
     """
+    ci = (custom_instructions or "").strip()
+    if ci:
+        ci = "\n额外要求（用户针对本次扫描的特别指示）：\n" + ci + "\n"
     substitutions = {
         **user_vars,
         "lang": _lang_instruction(language),
         "json_instruction": _JSON_INSTRUCTION,
+        "code_safety": _CODE_SAFETY,
+        "custom_instructions": ci,
     }
 
     def _fill(tpl: str) -> str:
@@ -333,95 +325,88 @@ def _fmt_supplementary(docs: str) -> str:
     if not docs:
         return ""
     return (
-        "## Supplementary Documentation (user-provided business context)\n"
-        "The user provided the following documentation to help understand this project. "
-        "It may contain business terminology, domain rules, process descriptions, or "
-        "product specs that aren't obvious from the code. Use it to bridge code "
-        "identifiers and business concepts.\n\n"
+        "## 补充文档（用户提供的业务上下文）\n"
+        "用户提供了以下文档来帮助理解项目。它可能包含业务术语、领域规则、"
+        "流程描述或产品规格——这些从代码里可能看不出来。用它来建立代码标识符"
+        "和业务概念之间的桥梁。\n\n"
         f"{docs}\n\n"
     )
 
 
 def build_overview_prompt(
-    file_tree: str, key_files: str, language: str = "en", supplementary_docs: str = ""
+    file_tree: str, key_files: str, language: str = "en",
+    supplementary_docs: str = "", custom_instructions: str = "",
 ) -> list[dict]:
     system_tpl, user_tpl = _template("overview")
     return _render(
-        system_tpl,
-        user_tpl,
+        system_tpl, user_tpl,
         {"file_tree": file_tree, "key_files": key_files,
          "supplementary_docs": _fmt_supplementary(supplementary_docs)},
-        language,
+        language, custom_instructions,
     )
 
 
 def build_module_prompt(
-    module_name: str,
-    files_context: str,
-    project_summary: str,
-    language: str = "en",
-    supplementary_docs: str = "",
+    module_name: str, files_context: str, project_summary: str,
+    language: str = "en", supplementary_docs: str = "", custom_instructions: str = "",
 ) -> list[dict]:
     system_tpl, user_tpl = _template("module")
     return _render(
-        system_tpl,
-        user_tpl,
+        system_tpl, user_tpl,
         {"module_name": module_name, "files_context": files_context,
          "project_summary": project_summary,
          "supplementary_docs": _fmt_supplementary(supplementary_docs)},
-        language,
+        language, custom_instructions,
     )
 
 
 def build_architecture_prompt(
-    file_tree: str,
-    key_files: str,
-    language: str = "en",
-    supplementary_docs: str = "",
+    file_tree: str, key_files: str, language: str = "en",
+    supplementary_docs: str = "", custom_instructions: str = "",
 ) -> list[dict]:
     system_tpl, user_tpl = _template("architecture")
     return _render(
-        system_tpl,
-        user_tpl,
+        system_tpl, user_tpl,
         {"file_tree": file_tree, "key_files": key_files,
          "supplementary_docs": _fmt_supplementary(supplementary_docs)},
-        language,
+        language, custom_instructions,
     )
 
 
 def build_reading_guide_prompt(
-    rankings: str,
-    module_summaries: str,
-    language: str = "en",
+    rankings: str, module_summaries: str, language: str = "en",
+    custom_instructions: str = "",
 ) -> list[dict]:
     system_tpl, user_tpl = _template("reading_guide")
     return _render(
-        system_tpl, user_tpl, {"rankings": rankings, "module_summaries": module_summaries}, language
+        system_tpl, user_tpl,
+        {"rankings": rankings, "module_summaries": module_summaries},
+        language, custom_instructions,
     )
 
 
 def build_chat_prompt(
-    question: str,
-    context_chunks: str,
-    language: str = "en",
+    question: str, context_chunks: str, language: str = "en",
+    custom_instructions: str = "",
 ) -> list[dict]:
     system_tpl, user_tpl = _template("chat")
-    return _render(system_tpl, user_tpl, {"question": question, "context_chunks": context_chunks}, language)
+    return _render(
+        system_tpl, user_tpl,
+        {"question": question, "context_chunks": context_chunks},
+        language, custom_instructions,
+    )
 
 
 def extract_json(text: str) -> dict | list | None:
     """extract JSON from LLM output, handling markdown fences and extra text."""
-    # strip markdown code fences
     text = re.sub(r"^```(?:json)?\s*\n?", "", text.strip(), flags=re.MULTILINE)
     text = re.sub(r"\n?```\s*$", "", text.strip(), flags=re.MULTILINE)
 
-    # try direct parse first
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # find the first { or [ and match to the last } or ]
     for start_char, end_char in [("{", "}"), ("[", "]")]:
         start = text.find(start_char)
         if start == -1:

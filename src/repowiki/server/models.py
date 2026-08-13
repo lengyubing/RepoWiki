@@ -13,6 +13,7 @@ class ScanRequest(BaseModel):
     api_key: str | None = None
     api_base: str | None = None
     supplementary_docs: str | None = None
+    custom_instructions: str | None = None
 
 
 class ProjectInfo(BaseModel):

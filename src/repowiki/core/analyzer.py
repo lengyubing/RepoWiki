@@ -123,6 +123,7 @@ class Analyzer:
         messages = build_overview_prompt(
             project.file_tree, key_files, self.language,
             supplementary_docs=project.supplementary_docs,
+            custom_instructions=project.custom_instructions,
         )
         raw = await self.llm.complete(messages, max_tokens=4096)
         data = extract_json(raw)
@@ -219,6 +220,7 @@ class Analyzer:
             messages = build_module_prompt(
                 name, files_context, project_summary, self.language,
                 supplementary_docs=project.supplementary_docs,
+                custom_instructions=project.custom_instructions,
             )
             raw = await self.llm.complete(messages, max_tokens=4096)
             data = extract_json(raw)
@@ -250,6 +252,7 @@ class Analyzer:
         messages = build_architecture_prompt(
             project.file_tree, key_files, self.language,
             supplementary_docs=project.supplementary_docs,
+            custom_instructions=project.custom_instructions,
         )
         raw = await self.llm.complete(messages, max_tokens=4096)
         data = extract_json(raw)
@@ -310,7 +313,10 @@ class Analyzer:
             except Exception:
                 pass
 
-        messages = build_reading_guide_prompt(rankings, module_summaries, self.language)
+        messages = build_reading_guide_prompt(
+            rankings, module_summaries, self.language,
+            custom_instructions=project.custom_instructions,
+        )
         raw = await self.llm.complete(messages, max_tokens=4096)
         data = extract_json(raw)
         if not data or not isinstance(data, dict):

@@ -141,7 +141,11 @@ async def chat(project_id: str, req: ChatRequest, x_api_key: str | None = Header
     from repowiki.llm.prompts import build_chat_prompt
 
     llm = LLMClient(model=cfg.model, api_key=cfg.api_key, api_base=cfg.api_base)
-    messages = build_chat_prompt(req.question, context_text, cfg.language)
+    # reuse per-scan custom instructions if the project has them
+    proj_ci = ""
+    if proj.get("project") and proj["project"].custom_instructions:
+        proj_ci = proj["project"].custom_instructions
+    messages = build_chat_prompt(req.question, context_text, cfg.language, proj_ci)
 
     async def event_stream():
         # send references first

@@ -14,6 +14,7 @@ export interface ScanRequest {
   model?: string;
   api_base?: string;
   supplementary_docs?: string;
+  custom_instructions?: string;
 }
 
 export interface ProjectInfo {
