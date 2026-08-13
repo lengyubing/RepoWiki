@@ -14,6 +14,58 @@ from repowiki.server.models import ChatRequest
 router = APIRouter()
 
 
+def _build_wiki_context(wiki, question: str) -> str:
+    """extract relevant business analysis from the generated wiki to augment chat.
+
+    Finds modules whose name/description/business_logic overlap with the question
+    keywords, and returns their analysis as a context block. This lets the chat
+    answer business-flow questions that RAG code chunks alone can't cover.
+    """
+    if not wiki:
+        return ""
+
+    # tokenize the question for matching (reuse the same logic as RAG)
+    from repowiki.core.rag import _tokenize
+    q_tokens = set(t.lower() for t in _tokenize(question) if len(t) > 1)
+    if not q_tokens:
+        return ""
+
+    blocks = []
+    for mod in getattr(wiki, "modules", []):
+        # score this module against the question
+        mod_text = " ".join([
+            mod.name or "", mod.purpose or "", mod.description or "",
+            mod.business_logic or "",
+            " ".join(c.name + " " + c.explanation for c in mod.key_concepts),
+        ]).lower()
+        mod_tokens = set(t.lower() for t in _tokenize(mod_text) if len(t) > 1)
+        overlap = q_tokens & mod_tokens
+        # require at least 2 keyword overlaps to include this module
+        if len(overlap) < 2:
+            continue
+
+        parts = [f"### Wiki Analysis: {mod.name} module"]
+        if mod.purpose:
+            parts.append(f"**Purpose:** {mod.purpose}")
+        if mod.description:
+            parts.append(f"**Description:** {mod.description}")
+        if mod.business_logic:
+            parts.append(f"**Business Logic:**\n{mod.business_logic}")
+        if mod.key_concepts:
+            concepts = "\n".join(f"- **{c.name}**: {c.explanation}" for c in mod.key_concepts)
+            parts.append(f"**Key Concepts:**\n{concepts}")
+        blocks.append("\n".join(parts))
+
+    if not blocks:
+        return ""
+
+    header = (
+        "## Wiki Analysis (previously generated business analysis — use this "
+        "for business logic and data flow questions):\n\n"
+    )
+    return header + "\n\n---\n\n".join(blocks)
+
+
 @router.post("/project/{project_id}/chat")
 async def chat(project_id: str, req: ChatRequest, x_api_key: str | None = Header(None)):
     """SSE streaming chat response with RAG retrieval."""
@@ -50,6 +102,13 @@ async def chat(project_id: str, req: ChatRequest, x_api_key: str | None = Header
         })
 
     context_text = "\n\n".join(context_parts)
+
+    # also pull in relevant wiki analysis (business logic, module descriptions,
+    # key concepts) as high-level context. RAG code chunks alone miss cross-file
+    # business flows; the wiki's analysis fills that gap.
+    wiki_context = _build_wiki_context(proj.get("wiki"), req.question)
+    if wiki_context:
+        context_text = wiki_context + "\n\n" + context_text
 
     # Resolve LLM config. Priority (highest first):
     #   1. request body (what the user just picked in Settings)
