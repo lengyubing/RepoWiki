@@ -98,10 +98,30 @@ def format_context(chunks: list[Chunk]) -> str:
 
 
 def _tokenize(text: str) -> list[str]:
-    """split text into lowercase tokens, keeping identifiers intact."""
-    # split on non-alphanumeric, underscore preserved
-    tokens = re.findall(r"[a-zA-Z_]\w*", text.lower())
-    return tokens
+    """split text into lowercase tokens, keeping identifiers intact.
+
+    Handles ASCII identifiers (snake_case, camelCase) and CJK text (Chinese,
+    Japanese, Korean). CJK characters are tokenized into runs so that Chinese
+    comments and queries are searchable -- without this, a query like
+    '核心业务' produces zero tokens and retrieves nothing.
+    """
+    text = text.lower()
+    # ASCII identifiers: letters, digits, underscore ( Programming identifiers)
+    ascii_tokens = re.findall(r"[a-z_]\w*", text)
+    # CJK runs: Chinese, Japanese (hiragana/katakana), Korean, CJK punctuation
+    # Split on whitespace/punctuation within CJK so we get meaningful units
+    # rather than one giant blob. Use 1+ char runs for short phrases.
+    cjk_runs = re.findall(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]+", text)
+    # further split CJK runs into 2-char bigrams for better matching
+    # (single chars are too generic, full runs are too specific)
+    cjk_tokens = []
+    for run in cjk_runs:
+        if len(run) <= 2:
+            cjk_tokens.append(run)
+        else:
+            for i in range(len(run) - 1):
+                cjk_tokens.append(run[i:i + 2])
+    return ascii_tokens + cjk_tokens
 
 
 def _cosine_similarity(vec_a: Counter, vec_b: Counter, idf: dict[str, float]) -> float:
