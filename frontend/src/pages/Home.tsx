@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { scanProject, streamScanProgress, getWiki, listProjects, type ProjectInfo } from "../lib/api";
+import { scanProject, streamScanProgress, getWiki, listProjects, deleteProject, type ProjectInfo } from "../lib/api";
 import { useWikiStore } from "../stores/wiki";
 import SettingsModal from "../components/SettingsModal";
 
@@ -21,6 +21,59 @@ export default function Home() {
       return new Date(ts * 1000).toLocaleString();
     } catch {
       return "";
+    }
+  }
+
+  async function handleDeleteProject(e: React.MouseEvent, projectId: string) {
+    e.stopPropagation();
+    if (!confirm("Delete this project from the list? (Source files on disk are not touched.)")) return;
+    await deleteProject(projectId);
+    setRecentProjects((prev) => prev.filter((p) => p.id !== projectId));
+  }
+
+  async function handleRescanArchived(project: ProjectInfo) {
+    // archived projects lost their wiki on restart — re-scan from the saved source
+    if (!project.source) return;
+    reset();
+    setLoading(true);
+    if (settings.apiKey) {
+      localStorage.setItem("repowiki_api_key", settings.apiKey);
+    }
+    try {
+      const info = await scanProject({
+        url: project.source,
+        language: settings.language,
+        model: settings.model || undefined,
+        api_base: settings.apiBase || undefined,
+      });
+      setProjectId(info.id);
+      setProject(info);
+      streamScanProgress(
+        info.id,
+        (step) => addProgress(step),
+        async (status) => {
+          if (status === "done") {
+            const wiki = await getWiki(info.id);
+            setWiki(wiki);
+            setLoading(false);
+            navigate(`/project/${info.id}`);
+          } else {
+            setError("Scan failed");
+            setLoading(false);
+          }
+        },
+      );
+    } catch (e: any) {
+      setError(e.message);
+      setLoading(false);
+    }
+  }
+
+  function handleProjectClick(project: ProjectInfo) {
+    if (project.status === "archived" && project.source) {
+      handleRescanArchived(project);
+    } else {
+      navigate(`/project/${project.id}`);
     }
   }
 
@@ -148,14 +201,21 @@ export default function Home() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {recentProjects.map((p) => {
                 const badge = statusLabel(p.status);
+                const isArchived = p.status === "archived";
                 return (
-                  <button
+                  <div
                     key={p.id}
-                    onClick={() => navigate(`/project/${p.id}`)}
-                    className="text-left bg-white rounded-lg border border-slate-200 p-4 hover:border-blue-400 hover:shadow-sm transition-all group"
+                    onClick={() => handleProjectClick(p)}
+                    className={`text-left bg-white rounded-lg border border-slate-200 p-4 transition-all group relative cursor-pointer ${
+                      isArchived
+                        ? "hover:border-amber-400 hover:shadow-sm"
+                        : "hover:border-blue-400 hover:shadow-sm"
+                    } ${loading ? "opacity-50 pointer-events-none" : ""}`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium text-slate-800 truncate group-hover:text-blue-600">
+                      <span className={`font-medium truncate group-hover:text-blue-600 ${
+                        isArchived ? "text-slate-600" : "text-slate-800"
+                      }`}>
                         {p.name || p.source || p.id}
                       </span>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${badge.cls}`}>
@@ -172,7 +232,18 @@ export default function Home() {
                       <span>{p.total_lines.toLocaleString()} lines</span>
                       {formatDate(p.created_at) && <span>{formatDate(p.created_at)}</span>}
                     </div>
-                  </button>
+                    {isArchived && (
+                      <p className="text-xs text-amber-600 mt-2">Click to re-scan and restore</p>
+                    )}
+                    {/* delete button */}
+                    <button
+                      onClick={(e) => handleDeleteProject(e, p.id)}
+                      className="absolute top-2 right-2 w-6 h-6 rounded-full text-slate-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center text-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Delete project"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 );
               })}
             </div>

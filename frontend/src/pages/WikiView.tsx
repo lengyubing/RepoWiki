@@ -17,11 +17,12 @@ export default function WikiView() {
   const timerRef = useRef<number | undefined>(undefined);
 
   // load wiki structure if not already loaded
+  const [wikiError, setWikiError] = useState(false);
   useEffect(() => {
     if (!wiki && id) {
       getWiki(id).then((w) => {
         if ("error" in w) {
-          navigate("/");
+          setWikiError(true);
           return;
         }
         setWiki(w);
@@ -47,8 +48,28 @@ export default function WikiView() {
 
   if (!wiki) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-slate-500">
-        Loading wiki...
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center max-w-md">
+          {wikiError ? (
+            <>
+              <p className="text-lg text-slate-700 font-medium mb-2">Wiki not in memory</p>
+              <p className="text-sm text-slate-500 mb-6">
+                This project was scanned in a previous session. Re-scan to regenerate the wiki
+                (it's fast — cached LLM results are reused).
+              </p>
+              <div className="flex gap-3 justify-center">
+                <button
+                  onClick={() => navigate("/")}
+                  className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors"
+                >
+                  Back to Home
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="text-slate-500 animate-pulse">Loading wiki...</p>
+          )}
+        </div>
       </div>
     );
   }
