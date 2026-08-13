@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { scanProject, streamScanProgress, getWiki, listProjects, deleteProject, type ProjectInfo } from "../lib/api";
+import { scanProject, getWiki, getProjectInfo, listProjects, deleteProject, type ProjectInfo } from "../lib/api";
 import { useWikiStore } from "../stores/wiki";
 import SettingsModal from "../components/SettingsModal";
 
@@ -36,6 +36,7 @@ export default function Home() {
     if (!project.source) return;
     reset();
     setLoading(true);
+    addProgress("Re-scanning project...");
     if (settings.apiKey) {
       localStorage.setItem("repowiki_api_key", settings.apiKey);
     }
@@ -48,21 +49,35 @@ export default function Home() {
       });
       setProjectId(info.id);
       setProject(info);
-      streamScanProgress(
-        info.id,
-        (step) => addProgress(step),
-        async (status) => {
-          if (status === "done") {
+
+      // poll status until done/error (more reliable than SSE for fast cached scans)
+      const poll = async () => {
+        try {
+          const current = await getProjectInfo(info.id);
+          if (current.status === "done") {
             const wiki = await getWiki(info.id);
             setWiki(wiki);
-            setLoading(false);
-            navigate(`/project/${info.id}`);
-          } else {
-            setError("Scan failed");
-            setLoading(false);
+            addProgress("Done!");
+            // brief pause so the user sees the completion before navigating
+            setTimeout(() => {
+              setLoading(false);
+              navigate(`/project/${info.id}`);
+            }, 800);
+            return;
           }
-        },
-      );
+          if (current.status === "error") {
+            setError(current.error || "Scan failed");
+            setLoading(false);
+            return;
+          }
+          // keep polling
+          setTimeout(poll, 1000);
+        } catch {
+          setError("Lost connection to server");
+          setLoading(false);
+        }
+      };
+      setTimeout(poll, 1000);
     } catch (e: any) {
       setError(e.message);
       setLoading(false);
@@ -108,22 +123,32 @@ export default function Home() {
       setProjectId(info.id);
       setProject(info);
 
-      // stream progress
-      streamScanProgress(
-        info.id,
-        (step) => addProgress(step),
-        async (status) => {
-          if (status === "done") {
+      // poll status until done/error
+      const poll = async () => {
+        try {
+          const current = await getProjectInfo(info.id);
+          if (current.status === "done") {
             const wiki = await getWiki(info.id);
             setWiki(wiki);
-            setLoading(false);
-            navigate(`/project/${info.id}`);
-          } else {
-            setError("Scan failed");
-            setLoading(false);
+            addProgress("Done!");
+            setTimeout(() => {
+              setLoading(false);
+              navigate(`/project/${info.id}`);
+            }, 800);
+            return;
           }
-        },
-      );
+          if (current.status === "error") {
+            setError(current.error || "Scan failed");
+            setLoading(false);
+            return;
+          }
+          setTimeout(poll, 1000);
+        } catch {
+          setError("Lost connection to server");
+          setLoading(false);
+        }
+      };
+      setTimeout(poll, 1000);
     } catch (e: any) {
       setError(e.message);
       setLoading(false);
