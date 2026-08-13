@@ -10,8 +10,8 @@ from repowiki.core.cache import Cache, content_hash
 from repowiki.core.graph import DependencyGraph
 from repowiki.core.models import (
     ArchitectureDiagram,
-    FileInfo,
-    ModuleDoc,
+    BusinessProcess,
+    DataFlowDetail,
     ProjectContext,
     ProjectOverview,
     ReadingGuide,
@@ -20,7 +20,8 @@ from repowiki.core.models import (
 from repowiki.llm.client import LLMClient
 from repowiki.llm.prompts import (
     build_architecture_prompt,
-    build_module_prompt,
+    build_business_process_prompt,
+    build_data_flow_prompt,
     build_overview_prompt,
     build_reading_guide_prompt,
     extract_json,
@@ -72,28 +73,30 @@ class Analyzer:
         progress("Generating project overview...")
         overview = await self._generate_overview(project, key_files_text, tree_hash)
 
-        # 3. group files into modules and analyze each
-        modules_map = self._group_into_modules(project.files)
-        progress(f"Analyzing {len(modules_map)} modules...")
-        module_docs = await self._analyze_modules(
-            modules_map, overview.one_liner, project, progress
-        )
+        # 3. generate business process analysis
+        progress("Analyzing business processes...")
+        business_process = await self._generate_business_process(project, key_files_text, tree_hash)
 
         # 4. generate architecture diagram
         progress("Detecting architecture...")
         architecture = await self._generate_architecture(project, key_files_text, tree_hash)
 
-        # 5. generate reading guide (needs module summaries + rankings placeholder)
+        # 5. generate data flow analysis
+        progress("Analyzing data flow...")
+        data_flow = await self._generate_data_flow(project, key_files_text, tree_hash)
+
+        # 6. generate reading guide
         progress("Creating reading guide...")
         reading_guide = await self._generate_reading_guide(
-            project, module_docs, tree_hash
+            project, overview, architecture, tree_hash
         )
 
         progress("Done!")
         return WikiData(
             overview=overview,
-            modules=module_docs,
             architecture=architecture,
+            business_process=business_process,
+            data_flow=data_flow,
             reading_guide=reading_guide,
         )
 
@@ -139,105 +142,6 @@ class Analyzer:
         await self.cache.put(cache_key, overview.model_dump())
         return overview
 
-    def _group_into_modules(self, files: list[FileInfo]) -> dict[str, list[FileInfo]]:
-        """group files by their top-level directory."""
-        from pathlib import Path
-
-        modules: dict[str, list[FileInfo]] = {}
-        for f in files:
-            parts = Path(f.path).parts
-            if len(parts) == 1:
-                # root-level files go into a "root" module
-                modules.setdefault("root", []).append(f)
-            else:
-                # use the first directory as module name
-                mod = parts[0]
-                # if it's a common wrapper like "src", use the second level
-                if mod in ("src", "lib", "pkg", "internal", "app") and len(parts) > 2:
-                    mod = parts[1]
-                modules.setdefault(mod, []).append(f)
-        return modules
-
-    async def _analyze_modules(
-        self,
-        modules: dict[str, list[FileInfo]],
-        project_summary: str,
-        project: ProjectContext,
-        progress: Callable[[str], None],
-    ) -> list[ModuleDoc]:
-        tasks = []
-        for name, files in modules.items():
-            tasks.append(self._analyze_one_module(name, files, project_summary, project))
-
-        results = []
-        reused = 0
-        regenerated = 0
-        for i, coro in enumerate(asyncio.as_completed(tasks)):
-            doc, was_cached = await coro
-            if doc:
-                results.append(doc)
-                if was_cached:
-                    reused += 1
-                else:
-                    regenerated += 1
-            progress(f"Analyzed module {i + 1}/{len(tasks)}")
-
-        if reused:
-            progress(f"Module analysis: {reused} reused from cache, {regenerated} regenerated")
-
-        # sort by number of files (largest first)
-        results.sort(key=lambda m: -len(m.files))
-        return results
-
-    async def _analyze_one_module(
-        self,
-        name: str,
-        files: list[FileInfo],
-        project_summary: str,
-        project: ProjectContext,
-    ) -> tuple[ModuleDoc | None, bool]:
-        async with self._sem:
-            # build context for this module
-            files_text_parts = []
-            content_parts = []
-            for f in files:
-                content = f.content if f.content else f.preview
-                if len(content) > 4096:
-                    content = content[:4096] + "\n... (truncated)"
-                files_text_parts.append(f"### {f.path} ({f.language})\n```{f.language}\n{content}\n```")
-                content_parts.append(content)
-
-            files_context = "\n\n".join(files_text_parts)
-            cache_key = f"module:{self.language}:{name}:{content_hash(''.join(content_parts))}"
-
-            cached = await self._cache_get(cache_key)
-            if cached:
-                try:
-                    return ModuleDoc(**cached), True
-                except Exception:
-                    pass
-
-            messages = build_module_prompt(
-                name, files_context, project_summary, self.language,
-                supplementary_docs=project.supplementary_docs,
-                custom_instructions=project.custom_instructions,
-            )
-            raw = await self.llm.complete(messages, max_tokens=4096)
-            data = extract_json(raw)
-            if not data or not isinstance(data, dict):
-                logger.warning("Failed to parse module '%s' JSON", name)
-                return ModuleDoc(name=name, purpose=f"Module containing {len(files)} files"), False
-
-            # ensure name is present (LLM sometimes omits it)
-            data.setdefault("name", name)
-            filtered = {k: v for k, v in data.items() if k in ModuleDoc.model_fields}
-            try:
-                doc = ModuleDoc(**filtered)
-            except Exception:
-                doc = ModuleDoc(name=name, purpose=data.get("purpose", ""))
-            await self.cache.put(cache_key, doc.model_dump())
-            return doc, False
-
     async def _generate_architecture(
         self, project: ProjectContext, key_files: str, tree_hash: str
     ) -> ArchitectureDiagram:
@@ -271,7 +175,8 @@ class Analyzer:
     async def _generate_reading_guide(
         self,
         project: ProjectContext,
-        module_docs: list[ModuleDoc],
+        overview: ProjectOverview,
+        architecture: ArchitectureDiagram,
         tree_hash: str,
     ) -> ReadingGuide:
         # PageRank over the import graph decides which files matter; scan order
@@ -298,10 +203,16 @@ class Analyzer:
             rankings_parts.append(f"{i}. {path}{tag} ({f.lines} lines)")
         rankings = "\n".join(rankings_parts)
 
-        module_parts = []
-        for m in module_docs:
-            module_parts.append(f"- **{m.name}**: {m.purpose}")
-        module_summaries = "\n".join(module_parts)
+        # build summaries from overview + architecture (no longer from per-module docs)
+        summary_parts = []
+        if overview.one_liner:
+            summary_parts.append(f"- **项目概述**: {overview.one_liner}")
+        if overview.key_features:
+            summary_parts.append(f"- **核心功能**: {', '.join(overview.key_features[:5])}")
+        if architecture.components:
+            for c in architecture.components[:5]:
+                summary_parts.append(f"- **组件 {c.name}**: {c.purpose}")
+        module_summaries = "\n".join(summary_parts)
 
         # key on the actual prompt inputs so an import-only edit that reshuffles
         # the ranking also invalidates the cached guide
@@ -330,3 +241,63 @@ class Analyzer:
             guide = ReadingGuide()
         await self.cache.put(cache_key, guide.model_dump())
         return guide
+
+    async def _generate_business_process(
+        self, project: ProjectContext, key_files: str, tree_hash: str,
+    ) -> BusinessProcess:
+        cache_key = f"bizproc:{self.language}:{tree_hash}"
+        cached = await self._cache_get(cache_key)
+        if cached:
+            try:
+                return BusinessProcess(**cached)
+            except Exception:
+                pass
+
+        messages = build_business_process_prompt(
+            project.file_tree, key_files, self.language,
+            supplementary_docs=project.supplementary_docs,
+            custom_instructions=project.custom_instructions,
+        )
+        raw = await self.llm.complete(messages, max_tokens=4096)
+        data = extract_json(raw)
+        if not data or not isinstance(data, dict):
+            logger.warning("Failed to parse business process JSON")
+            return BusinessProcess()
+
+        filtered = {k: v for k, v in data.items() if k in BusinessProcess.model_fields}
+        try:
+            bp = BusinessProcess(**filtered)
+        except Exception:
+            bp = BusinessProcess()
+        await self.cache.put(cache_key, bp.model_dump())
+        return bp
+
+    async def _generate_data_flow(
+        self, project: ProjectContext, key_files: str, tree_hash: str,
+    ) -> DataFlowDetail:
+        cache_key = f"dataflow:{self.language}:{tree_hash}"
+        cached = await self._cache_get(cache_key)
+        if cached:
+            try:
+                return DataFlowDetail(**cached)
+            except Exception:
+                pass
+
+        messages = build_data_flow_prompt(
+            project.file_tree, key_files, self.language,
+            supplementary_docs=project.supplementary_docs,
+            custom_instructions=project.custom_instructions,
+        )
+        raw = await self.llm.complete(messages, max_tokens=4096)
+        data = extract_json(raw)
+        if not data or not isinstance(data, dict):
+            logger.warning("Failed to parse data flow JSON")
+            return DataFlowDetail()
+
+        filtered = {k: v for k, v in data.items() if k in DataFlowDetail.model_fields}
+        try:
+            df = DataFlowDetail(**filtered)
+        except Exception:
+            df = DataFlowDetail()
+        await self.cache.put(cache_key, df.model_dump())
+        return df

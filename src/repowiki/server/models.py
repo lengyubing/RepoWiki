@@ -34,6 +34,13 @@ class ChatRequest(BaseModel):
     api_base: str | None = None
 
 
+class DeepDiveRequest(BaseModel):
+    question: str
+    keywords: list[str] = Field(default_factory=list)
+    model: str | None = None
+    api_base: str | None = None
+
+
 class FileReference(BaseModel):
     path: str
     line_start: int = 0

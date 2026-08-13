@@ -1,7 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { streamChat } from "../lib/api";
+import { streamChat, deepDive } from "../lib/api";
 import { useWikiStore } from "../stores/wiki";
+
+interface DeepDiveSuggestion {
+  keywords: string[];
+  question: string;
+}
 
 export default function ChatView() {
   const { id } = useParams<{ id: string }>();
@@ -9,11 +14,13 @@ export default function ChatView() {
   const { chatMessages, addChatMessage, appendToLastChat, setLastChatReferences, settings } = useWikiStore();
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [deepDiveSuggestions, setDeepDiveSuggestions] = useState<Record<number, DeepDiveSuggestion>>({});
+  const [deepDiving, setDeepDiving] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages]);
+  }, [chatMessages, deepDiveSuggestions]);
 
   function handleSend() {
     if (!input.trim() || !id || streaming) return;
@@ -23,17 +30,20 @@ export default function ChatView() {
     addChatMessage({ role: "assistant", content: "" });
     setStreaming(true);
 
+    const msgIndex = chatMessages.length + 1; // index of the assistant message
+
     streamChat(
       id,
       question,
       (data) => {
         if (data.references) setLastChatReferences(data.references);
         if (data.error) {
-          // LLM call failed — show a clear error instead of passing the error
-          // text off as a normal answer.
           const modelInfo = data.model ? `\n\nModel: ${data.model}` : "";
           const baseInfo = data.api_base ? `\nBase URL: ${data.api_base}` : "";
           appendToLastChat(`⚠️ ${data.error}${modelInfo}${baseInfo}\n\nPlease check your API Key and Base URL in Settings, then try again.`);
+        }
+        if (data.deep_dive_suggestion) {
+          setDeepDiveSuggestions((prev) => ({ ...prev, [msgIndex]: data.deep_dive_suggestion }));
         }
         if (data.content) appendToLastChat(data.content);
       },
@@ -43,6 +53,41 @@ export default function ChatView() {
         api_base: settings.apiBase || undefined,
       },
     );
+  }
+
+  async function handleDeepDive(msgIndex: number, suggestion: DeepDiveSuggestion) {
+    if (!id) return;
+    setDeepDiving(msgIndex);
+    try {
+      const result = await deepDive(id, suggestion.question, suggestion.keywords, {
+        model: settings.model || undefined,
+        api_base: settings.apiBase || undefined,
+      });
+      if (result.error) {
+        addChatMessage({ role: "assistant", content: `⚠️ 深度分析失败：${result.error}` });
+      } else {
+        addChatMessage({
+          role: "assistant",
+          content: `🔍 **深度分析完成**\n\n${result.analysis}\n\n---\n*已生成 wiki 页面：${result.page_id}*`,
+          references: result.references.map((r) => ({
+            path: r.path,
+            line_start: r.line_start,
+            line_end: r.line_end,
+            snippet: "",
+          })),
+        });
+      }
+      // clear the suggestion (user acted on it)
+      setDeepDiveSuggestions((prev) => {
+        const next = { ...prev };
+        delete next[msgIndex];
+        return next;
+      });
+    } catch (e: any) {
+      addChatMessage({ role: "assistant", content: `⚠️ 深度分析出错：${e.message}` });
+    } finally {
+      setDeepDiving(null);
+    }
   }
 
   return (
@@ -93,6 +138,28 @@ export default function ChatView() {
                 </div>
               )}
             </div>
+            {/* deep-dive suggestion */}
+            {msg.role === "assistant" && deepDiveSuggestions[i] && (
+              <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <p className="text-sm text-amber-800 font-medium mb-2">
+                  💡 检测到深度分析需求
+                </p>
+                <p className="text-xs text-amber-700 mb-3">
+                  建议使用扩展关键词重新检索代码，生成深入的专题分析并保存为 wiki 页面。
+                  <br />
+                  推荐关键词：{deepDiveSuggestions[i].keywords.map((k, j) => (
+                    <span key={j} className="inline-block bg-amber-200 text-amber-800 px-2 py-0.5 rounded text-xs mr-1 mb-1 font-mono">{k}</span>
+                  ))}
+                </p>
+                <button
+                  onClick={() => handleDeepDive(i, deepDiveSuggestions[i])}
+                  disabled={deepDiving !== null}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {deepDiving === i ? "🔍 正在深度分析..." : "🔍 开始深度分析"}
+                </button>
+              </div>
+            )}
           </div>
         ))}
         <div ref={bottomRef} />

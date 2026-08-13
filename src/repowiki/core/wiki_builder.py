@@ -52,44 +52,64 @@ class WikiBuilder:
         # 1. index / overview page
         overview = wiki_data.overview
         overview_md = self._build_overview_page(overview, project)
-        pages.append(WikiPage(id="index", title="Overview", content=overview_md, order=0))
-        sidebar.append(SidebarItem(title="Overview", page_id="index"))
+        pages.append(WikiPage(id="index", title="系统全览", content=overview_md, order=0))
+        sidebar.append(SidebarItem(title="系统全览", page_id="index"))
 
-        # 2. architecture page
+        # 2. business process page
+        bp = wiki_data.business_process
+        if bp.processes:
+            bp_md = self._build_business_process_page(bp)
+            pages.append(WikiPage(id="business-process", title="业务流程", content=bp_md, order=1))
+            sidebar.append(SidebarItem(title="业务流程", page_id="business-process"))
+
+        # 3. architecture page
         arch = wiki_data.architecture
         if arch.architecture_type:
             arch_md = self._build_architecture_page(arch)
-            pages.append(WikiPage(id="architecture", title="Architecture", content=arch_md, order=1))
-            sidebar.append(SidebarItem(title="Architecture", page_id="architecture"))
+            pages.append(WikiPage(id="architecture", title="系统架构", content=arch_md, order=2))
+            sidebar.append(SidebarItem(title="系统架构", page_id="architecture"))
 
-        # 3. module pages
-        module_sidebar = SidebarItem(title="Modules", page_id="", children=[])
-        for i, mod in enumerate(wiki_data.modules):
-            mod_id = f"modules/{mod.name}"
-            mod_md = self._build_module_page(mod)
-            pages.append(WikiPage(
-                id=mod_id, title=mod.name, content=mod_md,
-                parent_id="modules", order=i,
-            ))
-            module_sidebar.children.append(SidebarItem(title=mod.name, page_id=mod_id))
-        if module_sidebar.children:
-            sidebar.append(module_sidebar)
+        # 4. data flow page
+        df = wiki_data.data_flow
+        if df.summary or df.mermaid:
+            df_md = self._build_data_flow_page(df)
+            pages.append(WikiPage(id="data-flow", title="数据流图", content=df_md, order=3))
+            sidebar.append(SidebarItem(title="数据流图", page_id="data-flow"))
 
-        # 4. reading guide
+        # 5. reading guide
         guide = wiki_data.reading_guide
         if guide.steps:
             guide_md = self._build_reading_guide_page(guide)
-            pages.append(WikiPage(id="reading-guide", title="Reading Guide", content=guide_md, order=10))
-            sidebar.append(SidebarItem(title="Reading Guide", page_id="reading-guide"))
+            pages.append(WikiPage(id="reading-guide", title="阅读指南", content=guide_md, order=10))
+            sidebar.append(SidebarItem(title="阅读指南", page_id="reading-guide"))
 
-        # 5. dependency graph
+        # 6. dependency graph
         mermaid = graph.to_mermaid()
         if mermaid:
             dep_md = self._build_dependency_page(graph, mermaid)
-            pages.append(WikiPage(id="dependencies", title="Dependencies", content=dep_md, order=11))
-            sidebar.append(SidebarItem(title="Dependencies", page_id="dependencies"))
+            pages.append(WikiPage(id="dependencies", title="依赖关系", content=dep_md, order=11))
+            sidebar.append(SidebarItem(title="依赖关系", page_id="dependencies"))
 
         return Wiki(pages=pages, sidebar=sidebar, project_name=project.name)
+
+    def add_page(self, wiki: Wiki, page_id: str, title: str, content: str) -> Wiki:
+        """add a dynamically generated page (e.g. deep-dive) to an existing wiki.
+
+        If the page_id already exists, it's updated in place.
+        """
+        existing = wiki.get_page(page_id)
+        if existing:
+            existing.title = title
+            existing.content = content
+        else:
+            wiki.pages.append(WikiPage(id=page_id, title=title, content=content, order=20))
+            # add to sidebar under a "深度分析" group
+            dd_group = next((s for s in wiki.sidebar if s.page_id == "__deep_dives__"), None)
+            if dd_group is None:
+                dd_group = SidebarItem(title="深度分析", page_id="__deep_dives__", children=[])
+                wiki.sidebar.insert(-1 if wiki.sidebar else 0, dd_group)
+            dd_group.children.append(SidebarItem(title=title, page_id=page_id))
+        return wiki
 
     def _build_overview_page(self, overview, project) -> str:
         lines = [f"# {overview.name or project.name}\n"]
@@ -250,6 +270,47 @@ class WikiBuilder:
             lines.append("## Tips\n")
             for tip in guide.tips:
                 lines.append(f"- {tip}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _build_business_process_page(self, bp) -> str:
+        lines = ["# 业务流程\n"]
+        if bp.introduction:
+            lines.append(f"{bp.introduction}\n")
+
+        for proc in bp.processes:
+            lines.append(f"## {proc.order}. {proc.title}\n")
+            if proc.trigger:
+                lines.append(f"**触发条件：** {proc.trigger}\n")
+            if proc.flow:
+                lines.append(f"**处理流程：**\n\n{proc.flow}\n")
+            if proc.outcome:
+                lines.append(f"**结果：** {proc.outcome}\n")
+            if proc.key_methods:
+                lines.append("**关键方法：** " + ", ".join(f"`{m}`" for m in proc.key_methods) + "\n")
+
+        return "\n".join(lines)
+
+    def _build_data_flow_page(self, df) -> str:
+        lines = ["# 数据流图\n"]
+        if df.summary:
+            lines.append(f"{df.summary}\n")
+
+        if df.mermaid:
+            lines.append("## 数据流图\n")
+            lines.append(f"```mermaid\n{df.mermaid}\n```\n")
+
+        if df.entities:
+            lines.append("## 核心数据实体\n")
+            for e in df.entities:
+                lines.append(f"- {e}")
+            lines.append("")
+
+        if df.transformations:
+            lines.append("## 数据转换步骤\n")
+            for t in df.transformations:
+                lines.append(f"- {t}")
             lines.append("")
 
         return "\n".join(lines)

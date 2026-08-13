@@ -205,3 +205,24 @@ export interface ChatError {
   model?: string;
   api_base?: string;
 }
+
+export interface DeepDiveResponse {
+  analysis: string;
+  references: { path: string; line_start: number; line_end: number }[];
+  page_id: string;
+  error?: string;
+}
+
+export async function deepDive(
+  projectId: string,
+  question: string,
+  keywords: string[],
+  opts?: { model?: string; api_base?: string },
+): Promise<DeepDiveResponse> {
+  const res = await fetch(`${BASE}/project/${projectId}/deep-dive`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({ question, keywords, ...opts }),
+  });
+  return res.json();
+}

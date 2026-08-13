@@ -134,11 +134,37 @@ class ReadingGuide(BaseModel):
     tips: list[str] = Field(default_factory=list)
 
 
+class ProcessStep(BaseModel):
+    """a single business process / workflow in the project."""
+    order: int
+    title: str = ""
+    trigger: str = ""        # what triggers this process
+    flow: str = ""           # step-by-step processing description
+    outcome: str = ""        # result / side-effects
+    key_methods: list[str] = Field(default_factory=list)  # involved classes/methods
+
+
+class BusinessProcess(BaseModel):
+    """the main business processes / workflows in the project."""
+    introduction: str = ""
+    processes: list[ProcessStep] = Field(default_factory=list)
+
+
+class DataFlowDetail(BaseModel):
+    """detailed data flow analysis, richer than architecture.data_flow."""
+    summary: str = ""         # overall data flow narrative
+    mermaid: str = ""         # mermaid data-flow diagram
+    entities: list[str] = Field(default_factory=list)  # core data entities
+    transformations: list[str] = Field(default_factory=list)  # how data transforms at each stage
+
+
 class WikiData(BaseModel):
     """complete wiki analysis output."""
 
     overview: ProjectOverview = Field(default_factory=ProjectOverview)
-    modules: list[ModuleDoc] = Field(default_factory=list)
+    modules: list[ModuleDoc] = Field(default_factory=list)  # kept for compatibility, no longer primary
     architecture: ArchitectureDiagram = Field(default_factory=ArchitectureDiagram)
+    business_process: BusinessProcess = Field(default_factory=BusinessProcess)
+    data_flow: DataFlowDetail = Field(default_factory=DataFlowDetail)
     reading_guide: ReadingGuide = Field(default_factory=ReadingGuide)
     file_index: dict[str, FileDoc] = Field(default_factory=dict)
