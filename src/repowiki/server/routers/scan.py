@@ -17,14 +17,43 @@ from repowiki.server.models import ProjectInfo, ScanRequest
 router = APIRouter()
 
 
+def _normalize_source(source: str) -> str:
+    """normalize a project source for dedup.
+
+    Unifies path separators and strips trailing slashes so that
+    'D:/workspace/x', 'D:\\\\workspace\\\\x', and 'D:/workspace/x/' all map
+    to the same key. URLs are lowercased on the host part.
+    """
+    source = source.strip()
+    # local path: normalize backslashes to forward slashes
+    if "/" in source or "\\" in source:
+        source = source.replace("\\", "/").rstrip("/")
+    return source
+
+
+def _find_existing_project(source: str) -> str | None:
+    """find an in-memory project with the same normalized source, if any."""
+    projects = get_projects()
+    norm = _normalize_source(source)
+    for pid, proj in projects.items():
+        existing = proj.get("info")
+        if existing and _normalize_source(existing.source) == norm:
+            return pid
+    return None
+
+
 @router.post("/scan", response_model=ProjectInfo)
 async def start_scan(req: ScanRequest, background_tasks: BackgroundTasks,
                      x_api_key: str | None = Header(None)):
-    project_id = str(uuid.uuid4())[:8]
-    # remember the original input (local path or URL) for the project list
-    source = (req.path or req.url or "").strip()
-    info = ProjectInfo(id=project_id, name="", status="pending", source=source, created_at=time.time())
     projects = get_projects()
+    source = (req.path or req.url or "").strip()
+
+    # reuse the existing project entry for this source so the home page
+    # doesn't accumulate duplicates on every re-scan.
+    project_id = _find_existing_project(source) or str(uuid.uuid4())[:8]
+
+    # if reusing, drop the old persisted copy (it'll be overwritten on save)
+    info = ProjectInfo(id=project_id, name="", status="pending", source=source, created_at=time.time())
     projects[project_id] = {"info": info, "wiki": None, "project": None, "progress": []}
 
     background_tasks.add_task(_run_scan, project_id, req, x_api_key)
@@ -33,26 +62,42 @@ async def start_scan(req: ScanRequest, background_tasks: BackgroundTasks,
 
 @router.get("/projects")
 async def list_projects():
-    """list all known projects (in-memory + persisted), newest first."""
+    """list all known projects (in-memory + persisted), newest first.
+
+    Deduplicates by normalized source so the home page shows one entry per
+    project even if older scans with different path separators exist in SQLite.
+    """
     projects = get_projects()
-    seen: set[str] = set()
+    seen_ids: set[str] = set()
+    seen_sources: set[str] = set()
     items: list[dict] = []
+
+    def _try_add(info_data: dict):
+        src = _normalize_source(info_data.get("source", ""))
+        if src and src in seen_sources:
+            return  # duplicate of an already-listed project
+        if src:
+            seen_sources.add(src)
+        items.append(info_data)
+
     # in-memory entries first (most recent activity)
     for project_id, proj in projects.items():
-        seen.add(project_id)
+        seen_ids.add(project_id)
         info: ProjectInfo = proj["info"]
-        items.append(info.model_dump())
+        _try_add(info.model_dump())
+
     # then any persisted-only entries (recovered at startup, not yet re-scanned)
     cache = get_cache()
     try:
         for project_id, data, _created_at in await cache.list_projects():
-            if project_id in seen:
+            if project_id in seen_ids:
                 continue
             info_data = data.get("info") if isinstance(data, dict) else None
             if isinstance(info_data, dict):
-                items.append(info_data)
+                _try_add(info_data)
     except Exception:
         pass
+
     # sort by created_at descending
     items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return {"projects": items}
